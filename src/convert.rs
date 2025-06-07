@@ -57,9 +57,7 @@ pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> Result<String, Conve
 }
 
 pub async fn convert_video<P: AsRef<Path>>(file: P) -> Result<String, ConversionError> {
-    let new_path = move_to_new_folder(&file.as_ref(), "converted");
-    fs::copy(&file, &new_path).await?;
-    Ok(new_path.to_str().unwrap().to_owned())
+    convert(file, "mp4", &[]).await
 }
 
 pub async fn convert_audio<P: AsRef<Path>>(file: P) -> Result<String, ConversionError> {
