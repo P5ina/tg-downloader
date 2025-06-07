@@ -1,0 +1,6 @@
+services:
+  bot:
+    build: .
+    environment:
+      TELOXIDE_TOKEN: ${TELOXIDE_TOKEN}
+      RUST_LOG: INFO
