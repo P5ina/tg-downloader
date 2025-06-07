@@ -39,64 +39,39 @@ impl std::error::Error for ConversionError {
 }
 
 pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> Result<String, ConversionError> {
-    let input_path = file.as_ref();
-
-    let output_path = input_path.with_extension("mp4");
-    let output = process::Command::new("ffmpeg")
-        .args(["-y", "-i"])
-        .arg(&input_path)
-        .args([
+    convert(
+        file,
+        "mp4",
+        &[
             "-crf",
             "45",
             "-vf",
             "scale=(iw*sar)*max(512/(iw*sar)\\,512/ih):ih*max(512/(iw*sar)\\,512/ih), crop=512:512",
-        ])
-        .arg(&output_path)
-        .stdout(Stdio::null())
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        return Err(ConversionError::FfmpegFailed(
-            output.status,
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ));
-    }
-
-    let path = output_path.to_str().ok_or(ConversionError::NonUtf8Path)?;
-    Ok(path.to_owned())
+        ],
+    )
+    .await
 }
 
 pub async fn convert_video<P: AsRef<Path>>(file: P) -> Result<String, ConversionError> {
-    let input_path = file.as_ref();
-
-    let output_path = input_path.with_extension("mp4");
-    let output = process::Command::new("ffmpeg")
-        .args(["-y", "-i"])
-        .arg(&input_path)
-        .arg(&output_path)
-        .stdout(Stdio::null())
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        return Err(ConversionError::FfmpegFailed(
-            output.status,
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ));
-    }
-
-    let path = output_path.to_str().ok_or(ConversionError::NonUtf8Path)?;
-    Ok(path.to_owned())
+    convert(file, "mp4", &[]).await
 }
 
 pub async fn convert_audio<P: AsRef<Path>>(file: P) -> Result<String, ConversionError> {
+    convert(file, "mp3", &[]).await
+}
+
+pub async fn convert<P: AsRef<Path>>(
+    file: P,
+    ext: &str,
+    args: &[&str],
+) -> Result<String, ConversionError> {
     let input_path = file.as_ref();
 
-    let output_path = input_path.with_extension("mp3");
+    let output_path = input_path.with_extension(ext);
     let output = process::Command::new("ffmpeg")
         .args(["-y", "-i"])
         .arg(&input_path)
+        .args(args)
         .arg(&output_path)
         .stdout(Stdio::null())
         .output()
