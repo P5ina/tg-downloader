@@ -43,8 +43,8 @@ pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> Result<String, Conve
         file,
         "mp4",
         &[
-            "-crf",
-            "45",
+            "-t",
+            "60",
             "-vf",
             "scale=(iw*sar)*max(512/(iw*sar)\\,512/ih):ih*max(512/(iw*sar)\\,512/ih), crop=512:512",
         ],
