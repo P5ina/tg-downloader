@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use teloxide::{
+    ApiError, RequestError,
     prelude::*,
     types::{InputFile, MaybeInaccessibleMessage, ParseMode},
 };
@@ -60,10 +61,12 @@ pub async fn format_received(
             Err(e) => {
                 match e {
                     ConversionError::NonUtf8Path | ConversionError::IOError(_) => {
+                        fs::remove_file(filename).await?;
                         return Err(Box::new(e));
                     }
                     ConversionError::FfmpegFailed(exit, stderr) => {
                         log::error!("Ffmpeg error: Exit code {exit}, output: {stderr}");
+                        fs::remove_file(filename).await?;
                         bot.send_message(chat_id,
                         "Мы не смогли конвертировать ваше видео, попробуйте выбрать другой формат. \
                             Или попробуйте загрузить другое видео использовав команду /cancel").await?;
@@ -73,30 +76,46 @@ pub async fn format_received(
             }
         };
 
-        match media_format {
+        let result = match media_format {
             MediaFormatType::Video => {
                 bot.send_video(chat_id, InputFile::file(&formated_filename))
-                    .await?
+                    .await
             }
             MediaFormatType::Audio => {
                 bot.send_audio(chat_id, InputFile::file(&formated_filename))
-                    .await?
+                    .await
             }
             MediaFormatType::VideoNote => {
                 bot.send_video_note(chat_id, InputFile::file(&formated_filename))
-                    .await?
+                    .await
             }
             MediaFormatType::Voice => {
                 bot.send_voice(chat_id, InputFile::file(&formated_filename))
-                    .await?
+                    .await
             }
         };
 
-        bot.send_message(
-            chat_id,
-            "Ваше видео готово! Можете теперь отправить еще одно видео, чтобы сконвертировать и его.",
-        )
-        .await?;
+        match result {
+            Ok(_) => {
+                bot.send_message(
+                    chat_id,
+                    "Ваше видео готово! Можете теперь отправить еще одно видео, чтобы сконвертировать и его."
+                ).await?;
+            }
+            Err(e) => match e {
+                RequestError::Api(ref api_e) => match api_e {
+                    ApiError::RequestEntityTooLarge => {
+                        bot.send_message(
+                            chat_id,
+                            "Ваше видео получилось слишком большим, мы не можем его скачать.",
+                        )
+                        .await?;
+                    }
+                    _ => return Err(Box::new(e)),
+                },
+                _ => return Err(Box::new(e)),
+            },
+        }
         dialogue.exit().await?;
 
         // Cleanup
