@@ -1,7 +1,6 @@
 use std::str::FromStr;
 
 use teloxide::{
-    dispatching::dialogue::GetChatId,
     prelude::*,
     types::{InputFile, MaybeInaccessibleMessage, ParseMode},
 };
