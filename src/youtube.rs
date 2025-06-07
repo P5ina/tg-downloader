@@ -7,10 +7,10 @@ fn get_output_format(unique_id: &str) -> String {
 pub async fn get_filename(url: &str, unique_id: &str) -> io::Result<String> {
     let output = process::Command::new("yt-dlp")
         .arg("--no-playlist")
-        .arg("--print")
-        .arg("filename")
-        .arg("-o")
-        .arg(get_output_format(unique_id)) // чтобы точно знать шаблон
+        .args(["--socket-timeout", "5", "--retries", "3"])
+        .args(["--print", "filename"])
+        .args(["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4"])
+        .args(["-o", &get_output_format(unique_id)])
         .arg(url)
         .output()
         .await?;
@@ -31,8 +31,9 @@ pub async fn download_video(url: &str, unique_id: &str) -> io::Result<()> {
 
     let output = process::Command::new("yt-dlp")
         .arg("--no-playlist")
-        .arg("-o")
-        .arg(get_output_format(unique_id)) // тот же шаблон
+        .args(["--socket-timeout", "5", "--retries", "3"])
+        .args(["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4"])
+        .args(["-o", &get_output_format(unique_id)]) // тот же шаблон
         .arg(url)
         .output()
         .await?;

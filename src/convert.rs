@@ -1,6 +1,10 @@
-use std::{fmt, path::Path, process::Stdio};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    process::Stdio,
+};
 
-use tokio::process;
+use tokio::{fs, process};
 
 #[derive(Debug)]
 pub enum ConversionError {
@@ -67,7 +71,8 @@ pub async fn convert<P: AsRef<Path>>(
 ) -> Result<String, ConversionError> {
     let input_path = file.as_ref();
 
-    let output_path = input_path.with_extension(ext);
+    fs::create_dir_all("converted").await?;
+    let output_path = move_to_new_folder(&input_path.with_extension(ext), "converted");
     let output = process::Command::new("ffmpeg")
         .args(["-y", "-i"])
         .arg(&input_path)
@@ -86,4 +91,13 @@ pub async fn convert<P: AsRef<Path>>(
 
     let path = output_path.to_str().ok_or(ConversionError::NonUtf8Path)?;
     Ok(path.to_owned())
+}
+
+fn move_to_new_folder(path: &Path, new_folder: &str) -> PathBuf {
+    let filename = match path.file_name() {
+        Some(name) => name,
+        None => return PathBuf::from(new_folder), // fallback, если путь не содержит файла
+    };
+
+    Path::new(new_folder).join(filename)
 }

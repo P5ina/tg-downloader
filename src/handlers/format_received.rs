@@ -4,6 +4,7 @@ use teloxide::{
     prelude::*,
     types::{InputFile, MaybeInaccessibleMessage, ParseMode},
 };
+use tokio::fs;
 
 use crate::{
     convert::{ConversionError, convert_audio, convert_video, convert_video_note},
@@ -40,7 +41,7 @@ pub async fn format_received(
         log::info!("Found media format {:?}", media_format);
 
         let formated_filename_result = match media_format {
-            MediaFormatType::Video => convert_video(filename).await,
+            MediaFormatType::Video => convert_video(&filename).await,
             MediaFormatType::VideoNote => {
                 bot.edit_message_text(
                     chat_id,
@@ -49,9 +50,9 @@ pub async fn format_received(
                 )
                 .parse_mode(ParseMode::Html)
                 .await?;
-                convert_video_note(filename).await
+                convert_video_note(&filename).await
             }
-            MediaFormatType::Audio | MediaFormatType::Voice => convert_audio(filename).await,
+            MediaFormatType::Audio | MediaFormatType::Voice => convert_audio(&filename).await,
         };
 
         let formated_filename = match formated_filename_result {
@@ -74,19 +75,19 @@ pub async fn format_received(
 
         match media_format {
             MediaFormatType::Video => {
-                bot.send_video(chat_id, InputFile::file(formated_filename))
+                bot.send_video(chat_id, InputFile::file(&formated_filename))
                     .await?
             }
             MediaFormatType::Audio => {
-                bot.send_audio(chat_id, InputFile::file(formated_filename))
+                bot.send_audio(chat_id, InputFile::file(&formated_filename))
                     .await?
             }
             MediaFormatType::VideoNote => {
-                bot.send_video_note(chat_id, InputFile::file(formated_filename))
+                bot.send_video_note(chat_id, InputFile::file(&formated_filename))
                     .await?
             }
             MediaFormatType::Voice => {
-                bot.send_voice(chat_id, InputFile::file(formated_filename))
+                bot.send_voice(chat_id, InputFile::file(&formated_filename))
                     .await?
             }
         };
@@ -97,6 +98,10 @@ pub async fn format_received(
         )
         .await?;
         dialogue.exit().await?;
+
+        // Cleanup
+        fs::remove_file(formated_filename).await?;
+        fs::remove_file(filename).await?;
     }
 
     Ok(())
