@@ -57,7 +57,25 @@ pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> Result<String, Conve
 }
 
 pub async fn convert_video<P: AsRef<Path>>(file: P) -> Result<String, ConversionError> {
-    convert(file, "mp4", &[]).await
+    convert(
+        file,
+        "mp4",
+        &[
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-vf",
+            "setsar=1",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+        ],
+    )
+    .await
 }
 
 pub async fn convert_audio<P: AsRef<Path>>(file: P) -> Result<String, ConversionError> {
