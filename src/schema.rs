@@ -7,7 +7,11 @@ use teloxide::{
     utils::command::BotCommands,
 };
 
-use crate::{commands::*, handlers::link_received, utils::is_youtube_video_link};
+use crate::{
+    commands::*,
+    handlers::{format_received, link_received},
+    utils::is_youtube_video_link,
+};
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 pub type MyDialogue = Dialogue<State, InMemStorage<State>>;
@@ -51,5 +55,8 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'stat
                     .endpoint(link_received),
                 ),
         )
-        .branch(Update::filter_callback_query())
+        .branch(
+            Update::filter_callback_query()
+                .branch(case![State::ReceiveFormat { filename }].endpoint(format_received)),
+        )
 }

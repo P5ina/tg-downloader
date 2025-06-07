@@ -1,4 +1,5 @@
 mod commands;
+mod convert;
 mod handlers;
 mod schema;
 mod utils;
