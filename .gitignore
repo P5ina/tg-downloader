@@ -1,4 +1,6 @@
 /target
 /videos
 /converted
+
 .env
+.DS_Store

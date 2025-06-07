@@ -28,7 +28,7 @@ pub fn is_youtube_video_link(url: &str) -> bool {
     false
 }
 
-#[derive(EnumIter, Display, EnumString, Debug)]
+#[derive(EnumIter, Display, EnumString, Debug, Clone)]
 pub enum MediaFormatType {
     #[strum(to_string = "🎥 Видео")]
     Video,

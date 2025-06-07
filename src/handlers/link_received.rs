@@ -56,8 +56,11 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
         }
         Err(e) => {
             log::error!("yt-dlp error: {e}");
-            bot.send_message(msg.chat.id, "Не могу скачать это видео, попробуй другое.")
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                "❌ Не могу скачать это видео, попробуй другое.",
+            )
+            .await?;
         }
     }
     Ok(())

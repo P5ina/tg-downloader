@@ -26,7 +26,7 @@ pub async fn format_received(
             MaybeInaccessibleMessage::Regular(ref m) => m.chat.id,
         };
         bot.answer_callback_query(&query.id).await?;
-        let message_id = match message {
+        match message {
             MaybeInaccessibleMessage::Inaccessible(m) => {
                 let message = bot.send_message(m.chat.id, "Конвертируем...").await?;
                 message.id
@@ -44,10 +44,9 @@ pub async fn format_received(
         let formated_filename_result = match media_format {
             MediaFormatType::Video => convert_video(&filename).await,
             MediaFormatType::VideoNote => {
-                bot.edit_message_text(
+                bot.send_message(
                     chat_id,
-                    message_id,
-                    "Конвертируем...\n\n<b>Внимание</b> кружочек будет обрезан до 1 минуты.",
+                    "<b>⚠️ Внимание</b> кружочек будет обрезан до 1 минуты.",
                 )
                 .parse_mode(ParseMode::Html)
                 .await?;
