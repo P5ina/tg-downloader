@@ -1,4 +1,6 @@
 target/
+bot-api-data/
+
 .git
 .gitignore
 .env

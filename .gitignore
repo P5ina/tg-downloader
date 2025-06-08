@@ -1,6 +1,7 @@
 /target
 /videos
 /converted
+/bot-api-data
 
 .env
 .DS_Store
