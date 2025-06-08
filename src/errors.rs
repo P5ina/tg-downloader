@@ -13,8 +13,6 @@ pub enum BotError {
     TelegramError(teloxide::RequestError),
     /// Ошибки парсинга данных
     ParseError(String),
-    /// Файл не найден
-    FileNotFound(String),
     /// Файл слишком большой
     FileTooLarge(String),
     /// Внешняя команда завершилась с ошибкой
@@ -38,7 +36,6 @@ impl fmt::Display for BotError {
             BotError::FileSystemError(e) => write!(f, "Ошибка файловой системы: {}", e),
             BotError::TelegramError(e) => write!(f, "Ошибка Telegram API: {}", e),
             BotError::ParseError(msg) => write!(f, "Ошибка парсинга: {}", msg),
-            BotError::FileNotFound(path) => write!(f, "Файл не найден: {}", path),
             BotError::FileTooLarge(msg) => write!(f, "Файл слишком большой: {}", msg),
             BotError::ExternalCommandError { command, stderr } => {
                 write!(f, "Ошибка команды {}: {}", command, stderr)
@@ -127,10 +124,6 @@ impl From<strum::ParseError> for BotError {
 impl BotError {
     pub fn youtube_error(msg: impl Into<String>) -> Self {
         Self::YoutubeError(msg.into())
-    }
-
-    pub fn file_not_found(path: impl Into<String>) -> Self {
-        Self::FileNotFound(path.into())
     }
 
     pub fn file_too_large(msg: impl Into<String>) -> Self {

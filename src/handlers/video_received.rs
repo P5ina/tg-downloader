@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use teloxide::{net::Download, prelude::*, types::Video};
 use tokio::fs;
@@ -26,7 +26,7 @@ pub async fn video_received(
         &format!("custom_{unique_id}"),
     );
     log::debug!("Starting downloading video... {}", telegram_path.display());
-    let mut dst = fs::File::create(output_path).await?;
+    let mut dst = fs::File::create(&output_path).await?;
     let download_result = bot.download_file(&file.path, &mut dst).await;
     if let Err(e) = download_result {
         log::error!("Error downloading file: {:?}", e);
@@ -44,46 +44,4 @@ pub async fn video_received(
         .ok_or_else(|| BotError::general("Path should be valid"))?;
     send_format_message(bot, dialogue, msg, filename).await?;
     Ok(())
-}
-
-pub async fn download_file_locally(file_path: &str, output_path: &Path) -> HandlerResult {
-    // Проверяем, что это локальный путь Local Bot API
-    if file_path.starts_with("/var/lib/telegram-bot-api") {
-        // Файл уже есть локально, просто копируем его
-        let local_path = convert_api_path_to_local(file_path);
-
-        if local_path.exists() {
-            let destination = output_path;
-
-            // Копируем файл
-            log::debug!(
-                "Copy video file from {} to {}",
-                local_path.display(),
-                destination.display()
-            );
-            fs::copy(&local_path, &destination).await?;
-
-            log::info!(
-                "✅ Файл скопирован: {} -> {}",
-                file_path,
-                destination.display()
-            );
-            return Ok(());
-        } else {
-            return Err(BotError::file_not_found(file_path));
-        }
-    }
-
-    // Если путь не локальный, используем стандартную загрузку
-    Err(BotError::general("Файл не доступен локально"))
-}
-
-fn convert_api_path_to_local(api_path: &str) -> PathBuf {
-    // Убираем префикс /var/lib/telegram-bot-api и заменяем на bot-api-data
-    if let Some(relative_path) = api_path.strip_prefix("/var/lib/telegram-bot-api/") {
-        Path::new("bot-api-data").join(relative_path)
-    } else {
-        // Если путь не содержит стандартный префикс, возвращаем как есть
-        PathBuf::from(api_path)
-    }
 }
