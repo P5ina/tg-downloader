@@ -1,4 +1,7 @@
+use std::path::{Path, PathBuf};
+
 use strum::{Display, EnumIter, EnumString};
+use teloxide::types::Message;
 
 pub fn is_youtube_video_link(url: &str) -> bool {
     let url = url.trim().to_lowercase();
@@ -26,6 +29,27 @@ pub fn is_youtube_video_link(url: &str) -> bool {
     }
 
     false
+}
+
+pub fn get_unique_file_id(msg: Message) -> String {
+    format!("chat{}_msg{}", msg.chat.id, msg.id)
+}
+
+pub fn replace_path_keep_extension_inplace(
+    original_path: &Path,
+    new_dir: &str,
+    new_filename: &str,
+) -> PathBuf {
+    let extension = original_path.extension();
+    let mut result = PathBuf::from(new_dir);
+
+    if let Some(ext) = extension {
+        result.push(format!("{}.{}", new_filename, ext.to_string_lossy()));
+    } else {
+        result.push(new_filename);
+    }
+
+    result
 }
 
 #[derive(EnumIter, Display, EnumString, Debug, Clone)]

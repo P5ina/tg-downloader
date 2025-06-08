@@ -9,7 +9,7 @@ use teloxide::{
 
 use crate::{
     commands::*,
-    handlers::{format_received, link_received},
+    handlers::{format_received, link_received, video_received},
     utils::is_youtube_video_link,
 };
 
@@ -49,11 +49,11 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'stat
                 )
                 // Filter for the youtube links
                 .branch(
-                    dptree::filter(|msg: Message| {
-                        msg.text().map_or(false, |url| is_youtube_video_link(url))
-                    })
-                    .endpoint(link_received),
-                ),
+                    Message::filter_text()
+                        .filter(|text: String| is_youtube_video_link(&text))
+                        .endpoint(link_received),
+                )
+                .branch(Message::filter_video().endpoint(video_received)),
         )
         .branch(
             Update::filter_callback_query()

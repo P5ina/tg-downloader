@@ -37,22 +37,7 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
 
     match download_video(text, &unique_id).await {
         Ok(_) => {
-            let formats: Vec<InlineKeyboardButton> = MediaFormatType::iter()
-                .map(|f| format!("{}", f))
-                .map(|f| InlineKeyboardButton::callback(&f, &f))
-                .collect();
-
-            bot.send_message(
-                msg.chat.id,
-                "Видео загружено. Теперь выбери формат в котором ты хочешь получить это видео",
-            )
-            .reply_markup(
-                InlineKeyboardMarkup::default()
-                    .append_row([formats[0].clone(), formats[1].clone()])
-                    .append_row([formats[2].clone(), formats[3].clone()]),
-            )
-            .await?;
-            dialogue.update(State::ReceiveFormat { filename }).await?;
+            send_format_message(bot, dialogue, msg, &filename).await?;
         }
         Err(e) => {
             log::error!("yt-dlp error: {e}");
@@ -63,5 +48,34 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
             .await?;
         }
     }
+    Ok(())
+}
+
+pub async fn send_format_message(
+    bot: Bot,
+    dialogue: MyDialogue,
+    msg: Message,
+    filename: &str,
+) -> HandlerResult {
+    let formats: Vec<InlineKeyboardButton> = MediaFormatType::iter()
+        .map(|f| format!("{}", f))
+        .map(|f| InlineKeyboardButton::callback(&f, &f))
+        .collect();
+
+    bot.send_message(
+        msg.chat.id,
+        "Видео загружено. Теперь выбери формат в котором ты хочешь получить это видео",
+    )
+    .reply_markup(
+        InlineKeyboardMarkup::default()
+            .append_row([formats[0].clone(), formats[1].clone()])
+            .append_row([formats[2].clone(), formats[3].clone()]),
+    )
+    .await?;
+    dialogue
+        .update(State::ReceiveFormat {
+            filename: filename.to_owned(),
+        })
+        .await?;
     Ok(())
 }
