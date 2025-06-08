@@ -3,6 +3,7 @@ services:
     build: .
     environment:
       TELOXIDE_TOKEN: ${TELOXIDE_TOKEN}
+      TELOXIDE_API_URL: ${TELOXIDE_API_URL}
       RUST_LOG: INFO
     volumes:
       - ./bot-api-data:/bot-api-data
@@ -12,9 +13,9 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
-      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
-      - TELEGRAM_LOCAL=1
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      TELEGRAM_LOCAL: 1
     volumes:
       - ./bot-api-data:/var/lib/telegram-bot-api
     restart: unless-stopped
