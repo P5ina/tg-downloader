@@ -51,9 +51,9 @@ pub async fn compress_video<P: AsRef<Path>>(file: P) -> BotResult<String> {
         "mp4",
         &[
             "-crf",
-            "28", // Higher CRF = lower quality, smaller file
+            "32", // Higher CRF = lower quality, smaller file
             "-preset",
-            "medium", // Encoding speed vs compression efficiency
+            "fast", // Encoding speed vs compression efficiency
             "-vf",
             "scale=iw*min(1280/iw\\,720/ih):ih*min(1280/iw\\,720/ih)", // Scale down if needed
         ],
