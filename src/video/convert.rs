@@ -25,7 +25,7 @@ pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> BotResult<String> {
 
 pub async fn convert_video<P: AsRef<Path>>(file: P) -> BotResult<String> {
     // First try normal conversion
-    let converted_file = convert(file.as_ref(), "mp4", &[]).await?;
+    let converted_file = convert(file.as_ref(), "mp4", &["-fs", "90M"]).await?;
 
     // Check file size
     let file_size = fs::metadata(&converted_file).await?.len();

@@ -8,11 +8,11 @@ use teloxide::{
 use tokio::fs;
 
 use crate::{
-    convert::{compress_video, convert_audio, convert_video, convert_video_note},
     errors::{BotError, ConversionError, HandlerResult},
     schema::MyDialogue,
     utils::MediaFormatType,
     video::VideoInfo,
+    video::convert::{compress_video, convert_audio, convert_video, convert_video_note},
 };
 
 pub async fn format_received(

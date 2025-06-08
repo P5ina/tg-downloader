@@ -8,7 +8,7 @@ use crate::{
     errors::HandlerResult,
     schema::{MyDialogue, State},
     utils::MediaFormatType,
-    youtube::{
+    video::youtube::{
         download_video, format_duration, get_filename, get_video_duration, is_video_too_long,
     },
 };
