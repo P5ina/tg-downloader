@@ -41,6 +41,42 @@ impl VideoInfo {
         Self::parse_json(json)
     }
 
+    /// Get only duration of a video file
+    pub async fn get_duration(path: &str) -> BotResult<f64> {
+        let output = Command::new("ffprobe")
+            .args([
+                "-v",
+                "quiet",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "csv=p=0",
+                path,
+            ])
+            .output()
+            .await
+            .map_err(|e| BotError::external_command_error("ffprobe", e.to_string()))?;
+
+        if !output.status.success() {
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(BotError::external_command_error("ffprobe", error_msg));
+        }
+
+        let duration_str = String::from_utf8(output.stdout)
+            .map_err(|e| {
+                BotError::ParseError(format!("Failed to parse ffprobe output as UTF-8: {}", e))
+            })?
+            .trim()
+            .to_string();
+
+        duration_str.parse::<f64>().map_err(|e| {
+            BotError::ParseError(format!(
+                "Failed to parse duration '{}': {}",
+                duration_str, e
+            ))
+        })
+    }
+
     /// Parse JSON output from ffprobe
     fn parse_json(json: Value) -> BotResult<Self> {
         // Find video stream

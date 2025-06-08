@@ -8,13 +8,16 @@ use teloxide::{
     types::{InputFile, MaybeInaccessibleMessage, ParseMode},
 };
 use tokio::fs;
+use tokio::sync::mpsc;
 
 use crate::{
     errors::{BotError, ConversionError, HandlerResult},
     schema::MyDialogue,
-    utils::{MediaFormatType, compression_loading_screen, loading_screen},
-    video::VideoInfo,
-    video::convert::{compress_video, convert_audio, convert_video, convert_video_note},
+    utils::{
+        MediaFormatType, compression_loading_screen_with_progress, loading_screen_with_progress,
+    },
+    video::convert::{convert_audio, convert_video_note},
+    video::{VideoInfo, compress_video_with_progress, convert_video_with_progress},
 };
 
 pub async fn format_received(
@@ -51,16 +54,26 @@ pub async fn format_received(
 
         // Запускаем loading screen
         let should_stop_loading = Arc::new(AtomicBool::new(false));
+        let (progress_tx, progress_rx) = mpsc::unbounded_channel();
         let loading_task = {
             let bot_clone = bot.clone();
             let should_stop_clone = should_stop_loading.clone();
             tokio::spawn(async move {
-                loading_screen(bot_clone, chat_id, message_id, should_stop_clone).await;
+                loading_screen_with_progress(
+                    bot_clone,
+                    chat_id,
+                    message_id,
+                    should_stop_clone,
+                    progress_rx,
+                )
+                .await;
             })
         };
 
         let formated_filename_result = match media_format {
-            MediaFormatType::Video => convert_video(&filename).await,
+            MediaFormatType::Video => {
+                convert_video_with_progress(&filename, Some(progress_tx)).await
+            }
             MediaFormatType::VideoNote => {
                 bot.send_message(
                     chat_id,
@@ -115,26 +128,25 @@ pub async fn format_received(
                 )
                 .await?;
 
-                let message = bot.send_message(chat_id, "🚀 Начинаем сжатие...").await?;
-                let message_id = message.id;
-
                 // Запускаем loading screen для сжатия
                 let should_stop_compression = Arc::new(AtomicBool::new(false));
+                let (compression_progress_tx, compression_progress_rx) = mpsc::unbounded_channel();
                 let compression_task = {
                     let bot_clone = bot.clone();
                     let should_stop_clone = should_stop_compression.clone();
                     tokio::spawn(async move {
-                        compression_loading_screen(
+                        compression_loading_screen_with_progress(
                             bot_clone,
                             chat_id,
                             message_id,
                             should_stop_clone,
+                            compression_progress_rx,
                         )
                         .await;
                     })
                 };
 
-                match compress_video(&filename).await {
+                match compress_video_with_progress(&filename, Some(compression_progress_tx)).await {
                     Ok(compressed_file) => {
                         // Останавливаем compression loading screen
                         should_stop_compression.store(true, Ordering::Relaxed);
