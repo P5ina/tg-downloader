@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use teloxide::{prelude::*, types::Video};
+use teloxide::{net::Download, prelude::*, types::Video};
 use tokio::fs;
 
 use crate::{
@@ -26,7 +26,17 @@ pub async fn video_received(
         &format!("custom_{unique_id}"),
     );
     log::debug!("Starting downloading video... {}", telegram_path.display());
-    download_file_locally(&file.path, &output_path).await?;
+    let mut dst = fs::File::create(output_path).await?;
+    let download_result = bot.download_file(&file.path, &mut dst).await;
+    if let Err(e) = download_result {
+        log::error!("Error downloading file: {:?}", e);
+        bot.send_message(
+            msg.chat.id,
+            "⚠️ Мы не смогли скачать ваше видео, попробуйте еще раз.",
+        )
+        .await?;
+        return Err(BotError::general("Error downloading file"));
+    }
     log::debug!("Video downloaded");
 
     let filename = output_path
