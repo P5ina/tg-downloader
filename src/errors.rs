@@ -15,12 +15,8 @@ pub enum BotError {
     ParseError(String),
     /// Файл не найден
     FileNotFound(String),
-    /// Неподдерживаемый формат
-    UnsupportedFormat(String),
     /// Файл слишком большой
     FileTooLarge(String),
-    /// Неверные параметры
-    InvalidParameters(String),
     /// Внешняя команда завершилась с ошибкой
     ExternalCommandError { command: String, stderr: String },
     /// Общая ошибка с описанием
@@ -43,9 +39,7 @@ impl fmt::Display for BotError {
             BotError::TelegramError(e) => write!(f, "Ошибка Telegram API: {}", e),
             BotError::ParseError(msg) => write!(f, "Ошибка парсинга: {}", msg),
             BotError::FileNotFound(path) => write!(f, "Файл не найден: {}", path),
-            BotError::UnsupportedFormat(format) => write!(f, "Неподдерживаемый формат: {}", format),
             BotError::FileTooLarge(msg) => write!(f, "Файл слишком большой: {}", msg),
-            BotError::InvalidParameters(msg) => write!(f, "Неверные параметры: {}", msg),
             BotError::ExternalCommandError { command, stderr } => {
                 write!(f, "Ошибка команды {}: {}", command, stderr)
             }
@@ -139,16 +133,8 @@ impl BotError {
         Self::FileNotFound(path.into())
     }
 
-    pub fn unsupported_format(format: impl Into<String>) -> Self {
-        Self::UnsupportedFormat(format.into())
-    }
-
     pub fn file_too_large(msg: impl Into<String>) -> Self {
         Self::FileTooLarge(msg.into())
-    }
-
-    pub fn invalid_parameters(msg: impl Into<String>) -> Self {
-        Self::InvalidParameters(msg.into())
     }
 
     pub fn external_command_error(command: impl Into<String>, stderr: impl Into<String>) -> Self {

@@ -1,4 +1,6 @@
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use teloxide::{
     ApiError, RequestError,
@@ -10,7 +12,7 @@ use tokio::fs;
 use crate::{
     errors::{BotError, ConversionError, HandlerResult},
     schema::MyDialogue,
-    utils::MediaFormatType,
+    utils::{MediaFormatType, compression_loading_screen, loading_screen},
     video::VideoInfo,
     video::convert::{compress_video, convert_audio, convert_video, convert_video_note},
 };
@@ -30,13 +32,15 @@ pub async fn format_received(
             MaybeInaccessibleMessage::Regular(ref m) => m.chat.id,
         };
         bot.answer_callback_query(&query.id).await?;
-        match message {
+        let message_id = match message {
             MaybeInaccessibleMessage::Inaccessible(m) => {
-                let message = bot.send_message(m.chat.id, "Конвертируем...").await?;
+                let message = bot
+                    .send_message(m.chat.id, "🚀 Начинаем конвертацию...")
+                    .await?;
                 message.id
             }
             MaybeInaccessibleMessage::Regular(m) => {
-                bot.edit_message_text(chat_id, m.id, "Конвертируем...")
+                bot.edit_message_text(chat_id, m.id, "🚀 Начинаем конвертацию...")
                     .await?;
                 m.id
             }
@@ -44,6 +48,16 @@ pub async fn format_received(
 
         let media_format = MediaFormatType::from_str(s)?;
         log::info!("Found media format {:?}", media_format);
+
+        // Запускаем loading screen
+        let should_stop_loading = Arc::new(AtomicBool::new(false));
+        let loading_task = {
+            let bot_clone = bot.clone();
+            let should_stop_clone = should_stop_loading.clone();
+            tokio::spawn(async move {
+                loading_screen(bot_clone, chat_id, message_id, should_stop_clone).await;
+            })
+        };
 
         let formated_filename_result = match media_format {
             MediaFormatType::Video => convert_video(&filename).await,
@@ -64,14 +78,23 @@ pub async fn format_received(
             Err(BotError::ConversionError(e)) => {
                 match e {
                     ConversionError::NonUtf8Path | ConversionError::IOError(_) => {
+                        // Останавливаем loading screen
+                        should_stop_loading.store(true, Ordering::Relaxed);
+                        loading_task.abort();
+
                         fs::remove_file(filename).await?;
                         return Err(BotError::ConversionError(e));
                     }
                     ConversionError::FfmpegFailed(exit, stderr) => {
                         log::error!("Ffmpeg error: Exit code {}, output: {}", exit, stderr);
+
+                        // Останавливаем loading screen
+                        should_stop_loading.store(true, Ordering::Relaxed);
+                        loading_task.abort();
+
                         fs::remove_file(filename).await?;
-                        bot.send_message(chat_id,
-                        "Мы не смогли конвертировать ваше видео, попробуйте выбрать другой формат. \
+                        bot.edit_message_text(chat_id, message_id,
+                        "❌ Мы не смогли конвертировать ваше видео, попробуйте выбрать другой формат. \
                             Или попробуйте загрузить другое видео использовав команду /cancel").await?;
                         return Ok(());
                     }
@@ -79,34 +102,81 @@ pub async fn format_received(
             }
             Err(BotError::FileTooLarge(_)) if media_format == MediaFormatType::Video => {
                 // Only try compression for Video format
-                bot.send_message(
+
+                // Останавливаем основной loading screen
+                should_stop_loading.store(true, Ordering::Relaxed);
+                loading_task.abort();
+
+                // Показываем начальное сообщение о сжатии
+                bot.edit_message_text(
                     chat_id,
-                    "🔧 Видео получилось слишком большим (>80МБ), пробуем сжать...",
+                    message_id,
+                    "🔧 Видео получилось слишком большим (>80МБ), начинаем сжатие...",
                 )
                 .await?;
 
+                let message = bot.send_message(chat_id, "🚀 Начинаем сжатие...").await?;
+                let message_id = message.id;
+
+                // Запускаем loading screen для сжатия
+                let should_stop_compression = Arc::new(AtomicBool::new(false));
+                let compression_task = {
+                    let bot_clone = bot.clone();
+                    let should_stop_clone = should_stop_compression.clone();
+                    tokio::spawn(async move {
+                        compression_loading_screen(
+                            bot_clone,
+                            chat_id,
+                            message_id,
+                            should_stop_clone,
+                        )
+                        .await;
+                    })
+                };
+
                 match compress_video(&filename).await {
                     Ok(compressed_file) => {
-                        bot.send_message(chat_id, "✅ Видео успешно сжато до допустимого размера!")
-                            .await?;
+                        // Останавливаем compression loading screen
+                        should_stop_compression.store(true, Ordering::Relaxed);
+                        compression_task.abort();
+
+                        bot.edit_message_text(
+                            chat_id,
+                            message_id,
+                            "✅ Видео успешно сжато до допустимого размера!",
+                        )
+                        .await?;
                         compressed_file
                     }
                     Err(BotError::FileTooLarge(_)) => {
+                        // Останавливаем compression loading screen
+                        should_stop_compression.store(true, Ordering::Relaxed);
+                        compression_task.abort();
+
                         fs::remove_file(filename).await?;
-                        bot.send_message(
+                        bot.edit_message_text(
                             chat_id,
+                            message_id,
                             "❌ К сожалению, не удалось сжать видео до 80МБ. \
                             Попробуйте загрузить видео меньшего размера или более низкого качества."
                         ).await?;
                         return Ok(());
                     }
                     Err(e) => {
+                        // Останавливаем compression loading screen
+                        should_stop_compression.store(true, Ordering::Relaxed);
+                        compression_task.abort();
+
                         fs::remove_file(filename).await?;
                         return Err(e);
                     }
                 }
             }
             Err(e) => {
+                // Останавливаем loading screen
+                should_stop_loading.store(true, Ordering::Relaxed);
+                loading_task.abort();
+
                 fs::remove_file(filename).await?;
                 return Err(e);
             }
@@ -135,17 +205,29 @@ pub async fn format_received(
             }
         };
 
+        // Останавливаем loading screen
+        should_stop_loading.store(true, Ordering::Relaxed);
+        loading_task.abort(); // Принудительно завершаем задачу
+
         match result {
             Ok(_) => {
+                bot.edit_message_text(
+                    chat_id,
+                    message_id,
+                    "✅ Готово! Ваше видео успешно конвертировано!",
+                )
+                .await?;
                 bot.send_message(
                     chat_id,
-                    "Ваше видео готово! Можете теперь отправить еще одно видео, чтобы сконвертировать и его."
-                ).await?;
+                    "Можете теперь отправить еще одно видео, чтобы сконвертировать и его.",
+                )
+                .await?;
             }
             Err(RequestError::Api(ApiError::RequestEntityTooLarge)) => {
-                bot.send_message(
+                bot.edit_message_text(
                     chat_id,
-                    "Ваше видео получилось слишком большим, мы не можем его скачать.",
+                    message_id,
+                    "❌ Ваше видео получилось слишком большим, мы не можем его отправить.",
                 )
                 .await?;
             }

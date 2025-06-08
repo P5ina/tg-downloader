@@ -1,7 +1,12 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use strum::{Display, EnumIter, EnumString};
-use teloxide::types::Message;
+use teloxide::prelude::*;
+use teloxide::types::{ChatId, Message, MessageId};
+use tokio::time::sleep;
 
 pub fn is_youtube_video_link(url: &str) -> bool {
     let url = url.trim().to_lowercase();
@@ -62,4 +67,78 @@ pub enum MediaFormatType {
     VideoNote,
     #[strum(to_string = "🎙️ Войс")]
     Voice,
+}
+
+pub async fn loading_screen(
+    bot: Bot,
+    chat_id: ChatId,
+    message_id: MessageId,
+    should_stop: Arc<AtomicBool>,
+) {
+    let loading_messages = [
+        "🚀 Почти готово...",
+        "🔄 Еще конвертируем...",
+        "⚡ Обрабатываем видео...",
+        "🎬 Творим магию...",
+        "🛠️ Работаем над этим...",
+        "⏳ Терпение, волшебство требует времени...",
+        "🎯 Доводим до совершенства...",
+        "🔥 Скоро будет готово...",
+        "⚙️ Крутим-вертим...",
+        "🌟 Добавляем последние штрихи...",
+        "🎪 Устраиваем представление...",
+        "🔮 Колдуем над файлом...",
+    ];
+
+    // Ждем 3 секунды перед началом анимации, чтобы первое сообщение было видно
+    sleep(Duration::from_secs(3)).await;
+
+    let mut current_index = 0;
+
+    while !should_stop.load(Ordering::Relaxed) {
+        let message = loading_messages[current_index % loading_messages.len()];
+
+        // Обновляем сообщение (игнорируем ошибки если сообщение не может быть обновлено)
+        let _ = bot.edit_message_text(chat_id, message_id, message).await;
+
+        current_index += 1;
+        sleep(Duration::from_secs(3)).await; // Меняем сообщение каждые 3 секунды
+    }
+}
+
+pub async fn compression_loading_screen(
+    bot: Bot,
+    chat_id: ChatId,
+    message_id: MessageId,
+    should_stop: Arc<AtomicBool>,
+) {
+    let compression_messages = [
+        "🔧 Сжимаем видео...",
+        "🗜️ Уменьшаем размер...",
+        "📦 Упаковываем покрепче...",
+        "⚡ Применяем компрессию...",
+        "🎯 Оптимизируем качество...",
+        "🔄 Пережимаем пикселы...",
+        "⚙️ Настраиваем битрейт...",
+        "🚀 Делаем файл легче...",
+        "🌟 Сохраняем качество...",
+        "🎪 Творим чудеса сжатия...",
+        "🔮 Магия компрессии в действии...",
+        "💎 Превращаем в алмаз размера...",
+    ];
+
+    // Ждем 3 секунды перед началом анимации, чтобы первое сообщение было видно
+    sleep(Duration::from_secs(3)).await;
+
+    let mut current_index = 0;
+
+    while !should_stop.load(Ordering::Relaxed) {
+        let message = compression_messages[current_index % compression_messages.len()];
+
+        // Обновляем сообщение (игнорируем ошибки если сообщение не может быть обновлено)
+        let _ = bot.edit_message_text(chat_id, message_id, message).await;
+
+        current_index += 1;
+        sleep(Duration::from_secs(3)).await; // Меняем сообщение каждые 3 секунды
+    }
 }

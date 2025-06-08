@@ -9,7 +9,8 @@ use crate::{
     schema::{MyDialogue, State},
     utils::MediaFormatType,
     video::youtube::{
-        download_video, format_duration, get_filename, get_video_duration, is_video_too_long,
+        MAX_VIDEO_DURATION_SECONDS, download_video, format_duration, get_filename,
+        get_video_duration, is_video_too_long,
     },
 };
 
@@ -28,7 +29,7 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
         Ok(duration) => {
             if is_video_too_long(duration) {
                 let formatted_duration = format_duration(duration);
-                let max_duration = format_duration(3600); // 1 hour
+                let max_duration = format_duration(MAX_VIDEO_DURATION_SECONDS);
                 bot.send_message(
                     msg.chat.id,
                     format!(

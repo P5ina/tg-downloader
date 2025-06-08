@@ -3,7 +3,7 @@ use tokio::{fs, process};
 use crate::errors::{BotError, BotResult};
 
 const VIDEO_FORMAT: &str = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/mp4";
-const MAX_VIDEO_DURATION_SECONDS: u32 = 3600; // 1 hour
+pub const MAX_VIDEO_DURATION_SECONDS: u32 = 1200; // 20 minutes
 
 fn get_output_format(unique_id: &str) -> String {
     format!("videos/%(id)s_{unique_id}.%(ext)s")
