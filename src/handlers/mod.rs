@@ -1,4 +1,3 @@
-mod error_handler;
 mod format_received;
 mod link_received;
 mod video_received;

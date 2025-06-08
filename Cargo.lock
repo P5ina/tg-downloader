@@ -1546,6 +1546,7 @@ dependencies = [
  "dotenvy",
  "log",
  "pretty_env_logger",
+ "serde_json",
  "strum",
  "teloxide",
  "tokio",

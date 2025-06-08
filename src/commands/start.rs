@@ -1,6 +1,6 @@
 use teloxide::prelude::*;
 
-use crate::schema::HandlerResult;
+use crate::errors::HandlerResult;
 
 pub async fn start(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(

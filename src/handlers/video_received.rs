@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use teloxide::{net::Download, prelude::*, types::Video};
+use teloxide::{prelude::*, types::Video};
 use tokio::fs;
 
 use crate::{
+    errors::{BotError, HandlerResult},
     handlers::link_received::send_format_message,
-    schema::{HandlerResult, MyDialogue},
+    schema::MyDialogue,
     utils::{get_unique_file_id, replace_path_keep_extension_inplace},
 };
 
@@ -25,19 +26,17 @@ pub async fn video_received(
         &format!("custom_{unique_id}"),
     );
     log::debug!("Starting downloading video... {}", telegram_path.display());
-    download_file_locally(&bot, &file.path, &output_path).await?;
+    download_file_locally(&file.path, &output_path).await?;
     log::debug!("Video downloaded");
 
-    let filename = output_path.to_str().ok_or("Path should be valid")?;
+    let filename = output_path
+        .to_str()
+        .ok_or_else(|| BotError::general("Path should be valid"))?;
     send_format_message(bot, dialogue, msg, filename).await?;
     Ok(())
 }
 
-pub async fn download_file_locally(
-    bot: &Bot,
-    file_path: &str,
-    output_path: &Path,
-) -> HandlerResult {
+pub async fn download_file_locally(file_path: &str, output_path: &Path) -> HandlerResult {
     // Проверяем, что это локальный путь Local Bot API
     if file_path.starts_with("/var/lib/telegram-bot-api") {
         // Файл уже есть локально, просто копируем его
@@ -61,12 +60,12 @@ pub async fn download_file_locally(
             );
             return Ok(());
         } else {
-            return Err(format!("Файл не найден по пути: {}", file_path).into());
+            return Err(BotError::file_not_found(file_path));
         }
     }
 
     // Если путь не локальный, используем стандартную загрузку
-    Err("Файл не доступен локально".into())
+    Err(BotError::general("Файл не доступен локально"))
 }
 
 fn convert_api_path_to_local(api_path: &str) -> PathBuf {

@@ -5,20 +5,48 @@ use teloxide::{
 };
 
 use crate::{
-    schema::{HandlerResult, MyDialogue, State},
+    errors::HandlerResult,
+    schema::{MyDialogue, State},
     utils::MediaFormatType,
-    youtube::{download_video, get_filename},
+    youtube::{
+        download_video, format_duration, get_filename, get_video_duration, is_video_too_long,
+    },
 };
 
 pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    let text = msg
-        .text()
-        .ok_or("Text should be here. It's invalid state")?;
+    let text = msg.text().ok_or_else(|| {
+        crate::errors::BotError::general("Text should be here. It's invalid state")
+    })?;
 
     let unique_id = format!("chat{}_msg{}", msg.chat.id, msg.id);
 
     bot.send_chat_action(msg.chat.id, ChatAction::Typing)
         .await?;
+
+    // Check video duration first
+    match get_video_duration(text).await {
+        Ok(duration) => {
+            if is_video_too_long(duration) {
+                let formatted_duration = format_duration(duration);
+                let max_duration = format_duration(3600); // 1 hour
+                bot.send_message(
+                    msg.chat.id,
+                    format!(
+                        "❌ Видео слишком длинное ({}).\n\nМаксимальная длительность: {}",
+                        formatted_duration, max_duration
+                    ),
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+        Err(_) => {
+            // If we can't get duration, we'll still try to process the video
+            // This handles cases where duration might not be available but video is valid
+            log::warn!("Could not get video duration for URL: {}", text);
+        }
+    }
+
     let filename = match get_filename(text, &unique_id).await {
         Ok(f) => f,
         Err(_) => {
@@ -76,6 +104,9 @@ pub async fn send_format_message(
         .update(State::ReceiveFormat {
             filename: filename.to_owned(),
         })
-        .await?;
+        .await
+        .map_err(|e| {
+            crate::errors::BotError::general(format!("Failed to update dialogue: {}", e))
+        })?;
     Ok(())
 }

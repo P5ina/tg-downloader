@@ -9,11 +9,11 @@ use teloxide::{
 
 use crate::{
     commands::*,
+    errors::BotError,
     handlers::{format_received, link_received, video_received},
     utils::is_youtube_video_link,
 };
 
-pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 pub type MyDialogue = Dialogue<State, InMemStorage<State>>;
 
 #[derive(Clone, Default)]
@@ -34,7 +34,7 @@ enum Command {
     Cancel,
 }
 
-pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
+pub fn schema() -> UpdateHandler<BotError> {
     use dptree::case;
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()

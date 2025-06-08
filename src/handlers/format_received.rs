@@ -8,9 +8,11 @@ use teloxide::{
 use tokio::fs;
 
 use crate::{
-    convert::{ConversionError, convert_audio, convert_video, convert_video_note},
-    schema::{HandlerResult, MyDialogue},
+    convert::{convert_audio, convert_video, convert_video_note},
+    errors::{BotError, ConversionError, HandlerResult},
+    schema::MyDialogue,
     utils::MediaFormatType,
+    video::VideoInfo,
 };
 
 pub async fn format_received(
@@ -20,7 +22,9 @@ pub async fn format_received(
     query: CallbackQuery,
 ) -> HandlerResult {
     if let Some(s) = &query.data {
-        let message = query.message.ok_or("Couldn't find message")?;
+        let message = query
+            .message
+            .ok_or_else(|| BotError::general("Couldn't find message"))?;
         let chat_id = match message {
             MaybeInaccessibleMessage::Inaccessible(ref m) => m.chat.id,
             MaybeInaccessibleMessage::Regular(ref m) => m.chat.id,
@@ -57,14 +61,14 @@ pub async fn format_received(
 
         let formated_filename = match formated_filename_result {
             Ok(f) => f,
-            Err(e) => {
+            Err(BotError::ConversionError(e)) => {
                 match e {
                     ConversionError::NonUtf8Path | ConversionError::IOError(_) => {
                         fs::remove_file(filename).await?;
-                        return Err(Box::new(e));
+                        return Err(BotError::ConversionError(e));
                     }
                     ConversionError::FfmpegFailed(exit, stderr) => {
-                        log::error!("Ffmpeg error: Exit code {exit}, output: {stderr}");
+                        log::error!("Ffmpeg error: Exit code {}, output: {}", exit, stderr);
                         fs::remove_file(filename).await?;
                         bot.send_message(chat_id,
                         "Мы не смогли конвертировать ваше видео, попробуйте выбрать другой формат. \
@@ -73,11 +77,19 @@ pub async fn format_received(
                     }
                 }
             }
+            Err(e) => {
+                fs::remove_file(filename).await?;
+                return Err(e);
+            }
         };
 
         let result = match media_format {
             MediaFormatType::Video => {
+                let video_info = VideoInfo::from_file(&formated_filename).await?;
                 bot.send_video(chat_id, InputFile::file(&formated_filename))
+                    .width(video_info.width)
+                    .height(video_info.height)
+                    .duration(video_info.duration as u32)
                     .await
             }
             MediaFormatType::Audio => {
@@ -101,21 +113,19 @@ pub async fn format_received(
                     "Ваше видео готово! Можете теперь отправить еще одно видео, чтобы сконвертировать и его."
                 ).await?;
             }
-            Err(e) => match e {
-                RequestError::Api(ref api_e) => match api_e {
-                    ApiError::RequestEntityTooLarge => {
-                        bot.send_message(
-                            chat_id,
-                            "Ваше видео получилось слишком большим, мы не можем его скачать.",
-                        )
-                        .await?;
-                    }
-                    _ => return Err(Box::new(e)),
-                },
-                _ => return Err(Box::new(e)),
-            },
+            Err(RequestError::Api(ApiError::RequestEntityTooLarge)) => {
+                bot.send_message(
+                    chat_id,
+                    "Ваше видео получилось слишком большим, мы не можем его скачать.",
+                )
+                .await?;
+            }
+            Err(e) => return Err(e.into()),
         }
-        dialogue.exit().await?;
+        dialogue
+            .exit()
+            .await
+            .map_err(|e| BotError::general(format!("Failed to exit dialogue: {}", e)))?;
 
         // Cleanup
         fs::remove_file(formated_filename).await?;
