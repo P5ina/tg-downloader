@@ -52,7 +52,7 @@ pub fn replace_path_keep_extension_inplace(
     result
 }
 
-#[derive(EnumIter, Display, EnumString, Debug, Clone)]
+#[derive(EnumIter, Display, EnumString, Debug, Clone, PartialEq)]
 pub enum MediaFormatType {
     #[strum(to_string = "🎥 Видео")]
     Video,

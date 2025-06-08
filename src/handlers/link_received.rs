@@ -1,7 +1,7 @@
 use strum::IntoEnumIterator;
 use teloxide::{
     prelude::*,
-    types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup},
+    types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode},
 };
 
 use crate::{
@@ -32,10 +32,11 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
                 bot.send_message(
                     msg.chat.id,
                     format!(
-                        "❌ Видео слишком длинное ({}).\n\nМаксимальная длительность: {}",
+                        "<b>❌ Видео слишком длинное</b> ({}).\nМаксимальная длительность: {}",
                         formatted_duration, max_duration
                     ),
                 )
+                .parse_mode(ParseMode::Html)
                 .await?;
                 return Ok(());
             }

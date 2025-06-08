@@ -5,7 +5,9 @@ use std::{
 
 use tokio::{fs, process};
 
-use crate::errors::{BotResult, ConversionError};
+use crate::errors::{BotError, BotResult, ConversionError};
+
+const MAX_FILE_SIZE: u64 = 80 * 1024 * 1024; // 80MB in bytes
 
 pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> BotResult<String> {
     convert(
@@ -22,7 +24,54 @@ pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> BotResult<String> {
 }
 
 pub async fn convert_video<P: AsRef<Path>>(file: P) -> BotResult<String> {
-    convert(file, "mp4", &[]).await
+    // First try normal conversion
+    let converted_file = convert(file.as_ref(), "mp4", &[]).await?;
+
+    // Check file size
+    let file_size = fs::metadata(&converted_file).await?.len();
+
+    if file_size <= MAX_FILE_SIZE {
+        return Ok(converted_file);
+    }
+
+    // File is too big, remove it and try compression
+    fs::remove_file(&converted_file).await?;
+
+    // Return error to signal that compression is needed
+    Err(BotError::file_too_large(format!(
+        "File size {} bytes exceeds {} bytes limit",
+        file_size, MAX_FILE_SIZE
+    )))
+}
+
+pub async fn compress_video<P: AsRef<Path>>(file: P) -> BotResult<String> {
+    // Try compression with reduced quality
+    let compressed_file = convert(
+        file,
+        "mp4",
+        &[
+            "-crf",
+            "28", // Higher CRF = lower quality, smaller file
+            "-preset",
+            "medium", // Encoding speed vs compression efficiency
+            "-vf",
+            "scale=iw*min(1280/iw\\,720/ih):ih*min(1280/iw\\,720/ih)", // Scale down if needed
+        ],
+    )
+    .await?;
+
+    // Check if compressed file is still too big
+    let file_size = fs::metadata(&compressed_file).await?.len();
+
+    if file_size > MAX_FILE_SIZE {
+        fs::remove_file(&compressed_file).await?;
+        return Err(BotError::file_too_large(format!(
+            "Even compressed file size {} bytes exceeds {} bytes limit",
+            file_size, MAX_FILE_SIZE
+        )));
+    }
+
+    Ok(compressed_file)
 }
 
 pub async fn convert_audio<P: AsRef<Path>>(file: P) -> BotResult<String> {

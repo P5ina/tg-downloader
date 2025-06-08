@@ -8,7 +8,7 @@ use teloxide::{
 use tokio::fs;
 
 use crate::{
-    convert::{convert_audio, convert_video, convert_video_note},
+    convert::{compress_video, convert_audio, convert_video, convert_video_note},
     errors::{BotError, ConversionError, HandlerResult},
     schema::MyDialogue,
     utils::MediaFormatType,
@@ -74,6 +74,35 @@ pub async fn format_received(
                         "Мы не смогли конвертировать ваше видео, попробуйте выбрать другой формат. \
                             Или попробуйте загрузить другое видео использовав команду /cancel").await?;
                         return Ok(());
+                    }
+                }
+            }
+            Err(BotError::FileTooLarge(_)) if media_format == MediaFormatType::Video => {
+                // Only try compression for Video format
+                bot.send_message(
+                    chat_id,
+                    "🔧 Видео получилось слишком большим (>80МБ), пробуем сжать...",
+                )
+                .await?;
+
+                match compress_video(&filename).await {
+                    Ok(compressed_file) => {
+                        bot.send_message(chat_id, "✅ Видео успешно сжато до допустимого размера!")
+                            .await?;
+                        compressed_file
+                    }
+                    Err(BotError::FileTooLarge(_)) => {
+                        fs::remove_file(filename).await?;
+                        bot.send_message(
+                            chat_id,
+                            "❌ К сожалению, не удалось сжать видео до 80МБ. \
+                            Попробуйте загрузить видео меньшего размера или более низкого качества."
+                        ).await?;
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        fs::remove_file(filename).await?;
+                        return Err(e);
                     }
                 }
             }
