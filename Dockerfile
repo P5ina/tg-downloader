@@ -30,5 +30,7 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
 # Копируем бинарник Rust-приложения из предыдущего этапа
 COPY --from=builder /app/target/release/tg-downloader /usr/local/bin/app
 
+VOLUME ["/bot-api-data"]
+
 # По умолчанию запускаем приложение
 CMD ["app"]
