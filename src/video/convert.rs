@@ -7,7 +7,7 @@ use tokio::{fs, process};
 
 use crate::errors::{BotError, BotResult, ConversionError};
 
-const MAX_FILE_SIZE: u64 = 80 * 1024 * 1024; // 80MB in bytes
+const MAX_FILE_SIZE: u64 = 200 * 1024 * 1024; // 200MB in bytes
 
 pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> BotResult<String> {
     convert(
@@ -25,7 +25,7 @@ pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> BotResult<String> {
 
 pub async fn convert_video<P: AsRef<Path>>(file: P) -> BotResult<String> {
     // First try normal conversion
-    let converted_file = convert(file.as_ref(), "mp4", &["-fs", "90M"]).await?;
+    let converted_file = convert(file.as_ref(), "mp4", &["-fs", "240M"]).await?;
 
     // Check file size
     let file_size = fs::metadata(&converted_file).await?.len();
