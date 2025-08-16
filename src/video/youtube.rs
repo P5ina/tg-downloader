@@ -1,6 +1,9 @@
 use tokio::{fs, process};
 
-use crate::errors::{BotError, BotResult};
+use crate::{
+    errors::{BotError, BotResult},
+    temp_file::TempFile,
+};
 
 const VIDEO_FORMAT: &str = "bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/mp4";
 pub const MAX_VIDEO_DURATION_SECONDS: u32 = 3600; // 1 hour
@@ -15,28 +18,29 @@ fn build_base_command(url: &str, unique_id: &str) -> process::Command {
         .args(["--socket-timeout", "5", "--retries", "3"])
         .args(["-f", VIDEO_FORMAT])
         .args(["-o", &get_output_format(unique_id)])
+        .args(["--print", "filename"])
+        .args(["-q", "--no-warnings", "--no-simulate"])
         .arg(url);
     cmd
 }
 
-pub async fn get_filename(url: &str, unique_id: &str) -> BotResult<String> {
-    let mut cmd = build_base_command(url, unique_id);
-    let output = cmd
-        .args(["--print", "filename"])
-        .output()
-        .await
-        .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
+// pub async fn get_filename(url: &str, unique_id: &str) -> BotResult<String> {
+//     let mut cmd = build_base_command(url, unique_id);
+//     let output = cmd
+//         .output()
+//         .await
+//         .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
 
-    if output.status.success() {
-        let filename = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(filename)
-    } else {
-        let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
-        Err(BotError::youtube_error(stderr_str))
-    }
-}
+//     if output.status.success() {
+//         let filename = String::from_utf8_lossy(&output.stdout).trim().to_string();
+//         Ok(filename)
+//     } else {
+//         let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+//         Err(BotError::youtube_error(stderr_str))
+//     }
+// }
 
-pub async fn download_video(url: &str, unique_id: &str) -> BotResult<()> {
+pub async fn download_video(url: &str, unique_id: &str) -> BotResult<TempFile> {
     fs::create_dir_all("videos").await?;
 
     let output = build_base_command(url, unique_id)
@@ -45,7 +49,8 @@ pub async fn download_video(url: &str, unique_id: &str) -> BotResult<()> {
         .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
 
     if output.status.success() {
-        Ok(())
+        let filename = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(TempFile::new(filename))
     } else {
         let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
         Err(BotError::youtube_error(stderr_str))

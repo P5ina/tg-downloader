@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use strum::IntoEnumIterator;
 use teloxide::{
     prelude::*,
@@ -9,8 +11,8 @@ use crate::{
     schema::{MyDialogue, State},
     utils::MediaFormatType,
     video::youtube::{
-        MAX_VIDEO_DURATION_SECONDS, download_video, format_duration, get_filename,
-        get_video_duration, is_video_too_long,
+        MAX_VIDEO_DURATION_SECONDS, download_video, format_duration, get_video_duration,
+        is_video_too_long,
     },
 };
 
@@ -49,25 +51,13 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
         }
     }
 
-    let filename = match get_filename(text, &unique_id).await {
-        Ok(f) => f,
-        Err(_) => {
-            bot.send_message(
-                msg.chat.id,
-                "Не могу найти это видео, попробуй другую ссылку.",
-            )
-            .await?;
-            return Ok(());
-        }
-    };
-    log::info!("Downloading file: {filename}");
-
     bot.send_chat_action(msg.chat.id, ChatAction::UploadVideo)
         .await?;
 
+    log::info!("Downloading file.");
     match download_video(text, &unique_id).await {
-        Ok(_) => {
-            send_format_message(bot, dialogue, msg, &filename).await?;
+        Ok(file) => {
+            send_format_message(bot, dialogue, msg, file.path()).await?;
         }
         Err(e) => {
             log::error!("yt-dlp error: {e}");
@@ -85,7 +75,7 @@ pub async fn send_format_message(
     bot: Bot,
     dialogue: MyDialogue,
     msg: Message,
-    filename: &str,
+    filename: &PathBuf,
 ) -> HandlerResult {
     let formats: Vec<InlineKeyboardButton> = MediaFormatType::iter()
         .map(|f| format!("{}", f))
@@ -104,7 +94,7 @@ pub async fn send_format_message(
     .await?;
     dialogue
         .update(State::ReceiveFormat {
-            filename: filename.to_owned(),
+            filename: filename.to_str().unwrap().to_owned(),
         })
         .await
         .map_err(|e| {

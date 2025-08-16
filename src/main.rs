@@ -2,6 +2,7 @@ mod commands;
 mod errors;
 mod handlers;
 mod schema;
+mod temp_file;
 mod utils;
 mod video;
 

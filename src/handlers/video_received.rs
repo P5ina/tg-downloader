@@ -39,9 +39,6 @@ pub async fn video_received(
     }
     log::debug!("Video downloaded");
 
-    let filename = output_path
-        .to_str()
-        .ok_or_else(|| BotError::general("Path should be valid"))?;
-    send_format_message(bot, dialogue, msg, filename).await?;
+    send_format_message(bot, dialogue, msg, &output_path).await?;
     Ok(())
 }
