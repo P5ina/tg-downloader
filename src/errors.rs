@@ -1,5 +1,7 @@
 use std::fmt;
 
+use teloxide::dispatching::dialogue::InMemStorageError;
+
 /// Централизованная система ошибок для telegram бота
 #[derive(Debug)]
 pub enum BotError {
@@ -16,7 +18,12 @@ pub enum BotError {
     /// Файл слишком большой
     FileTooLarge(String),
     /// Внешняя команда завершилась с ошибкой
-    ExternalCommandError { command: String, stderr: String },
+    ExternalCommandError {
+        command: String,
+        stderr: String,
+    },
+    // Ошибка памяти бота
+    StorageError(InMemStorageError),
     /// Общая ошибка с описанием
     General(String),
 }
@@ -41,6 +48,7 @@ impl fmt::Display for BotError {
                 write!(f, "Ошибка команды {}: {}", command, stderr)
             }
             BotError::General(msg) => write!(f, "{}", msg),
+            BotError::StorageError(e) => write!(f, "Ошибка памяти бота: {}", e),
         }
     }
 }
@@ -63,6 +71,7 @@ impl std::error::Error for BotError {
             BotError::ConversionError(e) => Some(e),
             BotError::FileSystemError(e) => Some(e),
             BotError::TelegramError(e) => Some(e),
+            BotError::StorageError(e) => Some(e),
             _ => None,
         }
     }
@@ -117,6 +126,12 @@ impl From<std::str::Utf8Error> for BotError {
 impl From<strum::ParseError> for BotError {
     fn from(err: strum::ParseError) -> Self {
         BotError::ParseError(format!("Enum parsing error: {}", err))
+    }
+}
+
+impl From<InMemStorageError> for BotError {
+    fn from(err: InMemStorageError) -> Self {
+        Self::StorageError(err)
     }
 }
 

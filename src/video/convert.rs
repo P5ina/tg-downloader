@@ -33,10 +33,6 @@ pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> BotResult<String> {
     .await
 }
 
-pub async fn convert_video<P: AsRef<Path>>(file: P) -> BotResult<String> {
-    convert_video_with_progress(file, None).await
-}
-
 pub async fn convert_video_with_progress<P: AsRef<Path>>(
     file: P,
     progress_sender: Option<mpsc::UnboundedSender<ProgressInfo>>,

@@ -57,7 +57,7 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
     log::info!("Downloading file.");
     match download_video(text, &unique_id).await {
         Ok(file) => {
-            send_format_message(bot, dialogue, msg, file.path()).await?;
+            send_format_message(bot, dialogue, msg, &file).await?;
         }
         Err(e) => {
             log::error!("yt-dlp error: {e}");
@@ -75,7 +75,7 @@ pub async fn send_format_message(
     bot: Bot,
     dialogue: MyDialogue,
     msg: Message,
-    filename: &PathBuf,
+    filename: impl Into<PathBuf>,
 ) -> HandlerResult {
     let formats: Vec<InlineKeyboardButton> = MediaFormatType::iter()
         .map(|f| format!("{}", f))
@@ -94,7 +94,7 @@ pub async fn send_format_message(
     .await?;
     dialogue
         .update(State::ReceiveFormat {
-            filename: filename.to_str().unwrap().to_owned(),
+            filename: filename.into().to_str().unwrap().to_owned(),
         })
         .await
         .map_err(|e| {

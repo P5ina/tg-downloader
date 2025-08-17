@@ -1,9 +1,6 @@
 use tokio::{fs, process};
 
-use crate::{
-    errors::{BotError, BotResult},
-    temp_file::TempFile,
-};
+use crate::errors::{BotError, BotResult};
 
 const VIDEO_FORMAT: &str = "bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/mp4";
 pub const MAX_VIDEO_DURATION_SECONDS: u32 = 3600; // 1 hour
@@ -12,14 +9,11 @@ fn get_output_format(unique_id: &str) -> String {
     format!("videos/%(id)s_{unique_id}.%(ext)s")
 }
 
-fn build_base_command(url: &str, unique_id: &str) -> process::Command {
+fn build_base_command(url: &str) -> process::Command {
     let mut cmd = process::Command::new("yt-dlp");
     cmd.arg("--no-playlist")
         .args(["--socket-timeout", "5", "--retries", "3"])
         .args(["-f", VIDEO_FORMAT])
-        .args(["-o", &get_output_format(unique_id)])
-        .args(["--print", "filename"])
-        .args(["-q", "--no-warnings", "--no-simulate"])
         .arg(url);
     cmd
 }
@@ -40,17 +34,21 @@ fn build_base_command(url: &str, unique_id: &str) -> process::Command {
 //     }
 // }
 
-pub async fn download_video(url: &str, unique_id: &str) -> BotResult<TempFile> {
+pub async fn download_video(url: &str, unique_id: &str) -> BotResult<String> {
     fs::create_dir_all("videos").await?;
 
-    let output = build_base_command(url, unique_id)
+    let mut cmd = build_base_command(url);
+    let output = cmd
+        .args(["--print", "filename"])
+        .args(["-q", "--no-warnings", "--no-simulate"])
+        .args(["-o", &get_output_format(unique_id)])
         .output()
         .await
         .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
 
     if output.status.success() {
         let filename = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(TempFile::new(filename))
+        Ok(filename)
     } else {
         let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
         Err(BotError::youtube_error(stderr_str))
@@ -58,12 +56,9 @@ pub async fn download_video(url: &str, unique_id: &str) -> BotResult<TempFile> {
 }
 
 pub async fn get_video_duration(url: &str) -> BotResult<u32> {
-    let mut cmd = process::Command::new("yt-dlp");
+    let mut cmd = build_base_command(url);
     let output = cmd
-        .arg("--no-playlist")
-        .args(["--socket-timeout", "5", "--retries", "3"])
         .args(["--print", "duration"])
-        .arg(url)
         .output()
         .await
         .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;

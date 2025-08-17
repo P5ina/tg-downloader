@@ -10,7 +10,7 @@ use teloxide::{
 use crate::{
     commands::*,
     errors::BotError,
-    handlers::{format_received, link_received, video_received},
+    handlers::{duplicated_link_received, format_received, link_received, video_received},
     utils::is_youtube_video_link,
 };
 
@@ -51,7 +51,11 @@ pub fn schema() -> UpdateHandler<BotError> {
                 .branch(
                     Message::filter_text()
                         .filter(|text: String| is_youtube_video_link(&text))
-                        .endpoint(link_received),
+                        .branch(case![State::Start].endpoint(link_received))
+                        .branch(
+                            case![State::ReceiveFormat { filename }]
+                                .endpoint(duplicated_link_received),
+                        ),
                 )
                 .branch(Message::filter_video().endpoint(video_received)),
         )
