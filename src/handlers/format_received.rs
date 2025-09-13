@@ -17,7 +17,7 @@ use crate::{
         MediaFormatType, compression_loading_screen_with_progress, loading_screen_with_progress,
     },
     video::convert::{convert_audio, convert_video_note},
-    video::{VideoInfo, compress_video_with_progress, convert_video_with_progress},
+    video::{VideoInfo, compress_video_with_progress},
 };
 
 pub async fn format_received(
@@ -35,6 +35,71 @@ pub async fn format_received(
             MaybeInaccessibleMessage::Regular(ref m) => m.chat.id,
         };
         bot.answer_callback_query(&query.id).await?;
+
+        let media_format = MediaFormatType::from_str(s)?;
+        log::info!("Found media format {:?}", media_format);
+
+        // Для видео формата сразу отправляем без конвертации
+        if media_format == MediaFormatType::Video {
+            let message_id = match message {
+                MaybeInaccessibleMessage::Inaccessible(m) => {
+                    let message = bot
+                        .send_message(m.chat.id, "📤 Отправляем видео...")
+                        .await?;
+                    message.id
+                }
+                MaybeInaccessibleMessage::Regular(m) => {
+                    bot.edit_message_text(chat_id, m.id, "📤 Отправляем видео...")
+                        .await?;
+                    m.id
+                }
+            };
+
+            let video_info = VideoInfo::from_file(&filename).await?;
+            let result = bot.send_video(chat_id, InputFile::file(&filename))
+                .width(video_info.width)
+                .height(video_info.height)
+                .duration(video_info.duration as u32)
+                .await;
+
+            match result {
+                Ok(_) => {
+                    bot.edit_message_text(
+                        chat_id,
+                        message_id,
+                        "✅ Готово! Ваше видео отправлено!",
+                    )
+                    .await?;
+                    bot.send_message(
+                        chat_id,
+                        "Можете теперь отправить еще одно видео.",
+                    )
+                    .await?;
+                }
+                Err(RequestError::Api(ApiError::RequestEntityTooLarge)) => {
+                    bot.edit_message_text(
+                        chat_id,
+                        message_id,
+                        "❌ Ваше видео слишком большое, мы не можем его отправить.",
+                    )
+                    .await?;
+                }
+                Err(e) => {
+                    fs::remove_file(&filename).await?;
+                    return Err(e.into());
+                }
+            }
+
+            dialogue
+                .exit()
+                .await
+                .map_err(|e| BotError::general(format!("Failed to exit dialogue: {}", e)))?;
+
+            // Cleanup
+            fs::remove_file(filename).await?;
+            return Ok(());
+        }
+
         let message_id = match message {
             MaybeInaccessibleMessage::Inaccessible(m) => {
                 let message = bot
@@ -48,9 +113,6 @@ pub async fn format_received(
                 m.id
             }
         };
-
-        let media_format = MediaFormatType::from_str(s)?;
-        log::info!("Found media format {:?}", media_format);
 
         // Запускаем loading screen
         let should_stop_loading = Arc::new(AtomicBool::new(false));
@@ -72,7 +134,8 @@ pub async fn format_received(
 
         let formated_filename_result = match media_format {
             MediaFormatType::Video => {
-                convert_video_with_progress(&filename, Some(progress_tx)).await
+                // Для видео формата просто используем оригинальный файл без конвертации
+                Ok(filename.clone())
             }
             MediaFormatType::VideoNote => {
                 bot.send_message(
