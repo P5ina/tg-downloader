@@ -14,8 +14,6 @@ const MAX_FILE_SIZE: u64 = 200 * 1024 * 1024; // 200MB in bytes
 pub struct ProgressInfo {
     pub percentage: f32,
     pub estimated_time_remaining: Option<Duration>,
-    pub current_time: Duration,
-    pub total_duration: Option<Duration>,
 }
 
 pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> BotResult<String> {
@@ -56,10 +54,6 @@ pub async fn convert_video_with_progress<P: AsRef<Path>>(
         "File size {} bytes exceeds {} bytes limit",
         file_size, MAX_FILE_SIZE
     )))
-}
-
-pub async fn compress_video<P: AsRef<Path>>(file: P) -> BotResult<String> {
-    compress_video_with_progress(file, None).await
 }
 
 pub async fn compress_video_with_progress<P: AsRef<Path>>(
@@ -218,8 +212,6 @@ async fn monitor_progress(
                 let _ = sender.send(ProgressInfo {
                     percentage: 100.0,
                     estimated_time_remaining: Some(Duration::ZERO),
-                    current_time,
-                    total_duration,
                 });
                 break;
             }
@@ -271,8 +263,6 @@ async fn monitor_progress(
                     let _ = sender.send(ProgressInfo {
                         percentage,
                         estimated_time_remaining: eta,
-                        current_time,
-                        total_duration,
                     });
 
                     last_time = current_time;
@@ -293,8 +283,6 @@ async fn monitor_progress(
     let _ = sender.send(ProgressInfo {
         percentage: 100.0,
         estimated_time_remaining: Some(Duration::ZERO),
-        current_time: last_time,
-        total_duration,
     });
 }
 

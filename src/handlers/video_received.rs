@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use teloxide::{net::Download, prelude::*, types::Video};
+use teloxide::{prelude::*, types::Video};
 use tokio::fs;
 
 use crate::{
