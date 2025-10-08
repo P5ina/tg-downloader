@@ -2,7 +2,7 @@ use tokio::{fs, process};
 
 use crate::errors::{BotError, BotResult};
 
-const VIDEO_FORMAT: &str = "bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/mp4";
+// const VIDEO_FORMAT: &str = "bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/mp4";
 pub const MAX_VIDEO_DURATION_SECONDS: u32 = 3600; // 1 hour
 
 fn get_output_format(unique_id: &str) -> String {
@@ -13,7 +13,8 @@ fn build_base_command(url: &str) -> process::Command {
     let mut cmd = process::Command::new("yt-dlp");
     cmd.arg("--no-playlist")
         .args(["--socket-timeout", "5", "--retries", "3"])
-        .args(["-f", VIDEO_FORMAT])
+        .args(["--recode-video", "mp4"])
+        // .args(["-f", VIDEO_FORMAT])
         .arg(url);
     cmd
 }
