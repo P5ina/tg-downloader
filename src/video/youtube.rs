@@ -40,7 +40,7 @@ pub async fn download_video(url: &str, unique_id: &str) -> BotResult<String> {
 
     let mut cmd = build_base_command(url);
     let output = cmd
-        .args(["--print", "filename"])
+        .args(["--print", "after_move:filepath"])
         .args(["-q", "--no-warnings", "--no-simulate"])
         .args(["-o", &get_output_format(unique_id)])
         .output()
