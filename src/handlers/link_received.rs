@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use log::info;
 use strum::IntoEnumIterator;
 use teloxide::{
     prelude::*,
@@ -57,6 +58,7 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
     log::info!("Downloading file.");
     match download_video(text, &unique_id).await {
         Ok(file) => {
+            info!("Downloaded file with name {}", file);
             send_format_message(bot, dialogue, msg, &file).await?;
         }
         Err(e) => {
