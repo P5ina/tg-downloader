@@ -13,7 +13,7 @@ fn build_base_command(url: &str) -> process::Command {
     let mut cmd = process::Command::new("yt-dlp");
     cmd.arg("--no-playlist")
         .args(["--socket-timeout", "5", "--retries", "3"])
-        .args(["--recode-video", "mp4"])
+        .args(["--remux-video", "mp4"])
         // .args(["-f", VIDEO_FORMAT])
         .arg(url);
     cmd
