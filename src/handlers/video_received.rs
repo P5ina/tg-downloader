@@ -28,10 +28,15 @@ pub async fn video_received(
         "videos",
         &format!("custom_{unique_id}"),
     );
-    log::debug!("Starting downloading video... {}", telegram_path.display());
-    let download_result = fs::copy(local_path, &output_path).await;
+    log::info!(
+        "Downloading video: file.path={}, local_path={}, output_path={}",
+        file.path,
+        local_path,
+        output_path.display()
+    );
+    let download_result = fs::copy(&local_path, &output_path).await;
     if let Err(e) = download_result {
-        log::error!("Error downloading file: {:?}", e);
+        log::error!("Error downloading file from {} to {}: {:?}", local_path, output_path.display(), e);
         bot.send_message(
             msg.chat.id,
             "⚠️ Мы не смогли скачать ваше видео, попробуйте еще раз.",
