@@ -20,7 +20,7 @@ pub async fn video_received(
 
     let unique_id = get_unique_file_id(msg.clone());
     let container_path = "/var/lib/telegram-bot-api";
-    let host_path = "bot-api-data";
+    let host_path = "/bot-api-data";
     let local_path = file.path.replace(container_path, host_path);
     let telegram_path = Path::new(&local_path);
     let output_path = replace_path_keep_extension_inplace(
