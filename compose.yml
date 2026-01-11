@@ -4,6 +4,7 @@ services:
     environment:
       TELOXIDE_TOKEN: ${TELOXIDE_TOKEN}
       TELOXIDE_API_URL: ${TELOXIDE_API_URL}
+      ADMIN_ID: ${ADMIN_ID}
       RUST_LOG: INFO
     volumes:
       - ./bot-api-data:/bot-api-data

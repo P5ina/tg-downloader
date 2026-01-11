@@ -38,6 +38,8 @@ enum Command {
     Queue,
     /// Show premium subscription status
     Premium,
+    /// Grant subscription (admin only)
+    Grant,
 }
 
 /// Check if callback data is a format selection from queue (fmt:...)
@@ -73,7 +75,8 @@ pub fn schema() -> UpdateHandler<BotError> {
                                 .branch(case![Command::Start].endpoint(start))
                                 .branch(case![Command::Cancel].endpoint(cancel))
                                 .branch(case![Command::Queue].endpoint(queue))
-                                .branch(case![Command::Premium].endpoint(premium)),
+                                .branch(case![Command::Premium].endpoint(premium))
+                                .branch(case![Command::Grant].endpoint(grant)),
                         )
                         // Filter for the youtube links - now accepts links in any state
                         .branch(
