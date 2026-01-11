@@ -95,22 +95,33 @@ fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
     let mut cmd = process::Command::new("yt-dlp");
     cmd.arg("--no-playlist")
         .args(["--socket-timeout", "5", "--retries", "3"])
-        // Force recode to mp4 with H.264 for Telegram/Apple compatibility
-        // --recode-video forces transcoding even for single-stream downloads
-        .args(["--recode-video", "mp4"])
+        // Merge streams into mp4 container without re-encoding when possible
+        .args(["--merge-output-format", "mp4"])
+        // Add faststart for streaming compatibility (quick metadata seek)
         .args([
             "--postprocessor-args",
-            "VideoConvertor:-c:v libx264 -preset medium -crf 18 -c:a aac -b:a 192k -movflags +faststart",
+            "ffmpeg:-movflags +faststart",
         ]);
 
-    // Apply quality filter if specified
+    // Apply quality filter - prefer H.264 (avc1) and AAC for Telegram compatibility
+    // This avoids re-encoding since these codecs are natively supported
     if let Some(height) = max_height {
-        // Don't filter by ext - yt-dlp will merge to mp4 anyway
+        // Prefer h264 video + aac/m4a audio, fall back to best available
         let format = format!(
-            "bestvideo[height<={}]+bestaudio/best[height<={}]/best",
-            height, height
+            "bestvideo[height<={}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/\
+             bestvideo[height<={}][vcodec^=avc1]+bestaudio/\
+             bestvideo[height<={}]+bestaudio/\
+             best[height<={}]/best",
+            height, height, height, height
         );
         cmd.args(["-f", &format]);
+    } else {
+        // No height limit - prefer h264 + aac for compatibility
+        cmd.args(["-f",
+            "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/\
+             bestvideo[vcodec^=avc1]+bestaudio/\
+             bestvideo+bestaudio/best"
+        ]);
     }
 
     cmd.arg(url);
