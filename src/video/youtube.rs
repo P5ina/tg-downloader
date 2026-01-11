@@ -1,6 +1,13 @@
+use std::process::Stdio;
+
 use log::info;
 use serde::Deserialize;
-use tokio::{fs, process};
+use tokio::{
+    fs,
+    io::{AsyncBufReadExt, BufReader},
+    process,
+    sync::mpsc,
+};
 
 use crate::errors::{BotError, BotResult};
 
@@ -146,33 +153,91 @@ fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
 //     }
 // }
 
-pub async fn download_video(url: &str, unique_id: &str, max_height: Option<u32>) -> BotResult<String> {
+/// Parse download progress from yt-dlp output line
+/// Example: "[download]  45.2% of 82.40MiB at 2.49MiB/s ETA 00:15"
+fn parse_progress(line: &str) -> Option<u8> {
+    if !line.contains("[download]") || !line.contains('%') {
+        return None;
+    }
+
+    // Find percentage pattern
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    for part in parts {
+        if part.ends_with('%') {
+            if let Ok(pct) = part.trim_end_matches('%').parse::<f32>() {
+                return Some(pct.min(100.0) as u8);
+            }
+        }
+    }
+    None
+}
+
+pub async fn download_video_with_progress(
+    url: &str,
+    unique_id: &str,
+    max_height: Option<u32>,
+    progress_sender: Option<mpsc::UnboundedSender<u8>>,
+) -> BotResult<String> {
     fs::create_dir_all("videos").await?;
 
     let mut cmd = build_base_command(url, max_height);
-    let cmd2: &mut process::Command = cmd
-        .args(["--no-simulate"])
+    cmd.args(["--no-simulate"])
         .args(["-o", &get_output_format(unique_id)])
-        .args(["--print", "after_move:filepath"]);
+        .args(["--print", "after_move:filepath"])
+        .args(["--newline"]) // Each progress update on new line
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     info!("Starting download: {} (quality: {:?})", url, max_height);
-    info!("Running command: {:?}", cmd2);
 
-    let output = cmd2
-        .output()
-        .await
+    let mut child = cmd
+        .spawn()
         .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
 
-    info!("yt-dlp exit code: {:?}", output.status.code());
+    let stdout = child.stdout.take().expect("stdout was piped");
+    let stderr = child.stderr.take().expect("stderr was piped");
 
-    if output.status.success() {
-        let filename = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    // Read stdout for progress and filename
+    let mut reader = BufReader::new(stdout).lines();
+    let mut filename = String::new();
+    let mut last_progress: u8 = 0;
+
+    while let Ok(Some(line)) = reader.next_line().await {
+        // Try to parse progress
+        if let Some(progress) = parse_progress(&line) {
+            // Only send if progress changed significantly (avoid spam)
+            if progress > last_progress || progress == 100 {
+                last_progress = progress;
+                if let Some(ref sender) = progress_sender {
+                    let _ = sender.send(progress);
+                }
+            }
+        }
+
+        // The last line with filepath (from --print after_move:filepath)
+        if !line.starts_with('[') && !line.is_empty() {
+            filename = line;
+        }
+    }
+
+    let status = child.wait().await
+        .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
+
+    info!("yt-dlp exit code: {:?}", status.code());
+
+    if status.success() {
         info!("Download successful: {}", filename);
         Ok(filename)
     } else {
-        let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
-        log::error!("yt-dlp failed: {}", stderr_str);
-        Err(BotError::youtube_error(stderr_str))
+        // Read stderr for error message
+        let mut stderr_reader = BufReader::new(stderr).lines();
+        let mut stderr_output = String::new();
+        while let Ok(Some(line)) = stderr_reader.next_line().await {
+            stderr_output.push_str(&line);
+            stderr_output.push('\n');
+        }
+        log::error!("yt-dlp failed: {}", stderr_output);
+        Err(BotError::youtube_error(stderr_output))
     }
 }
 

@@ -323,9 +323,10 @@ impl TaskQueue {
             let pending_conversions = self.pending_conversions.clone();
 
             // Spawn task handler
+            let task_statuses_for_progress = task_statuses.clone();
             tokio::spawn(async move {
                 log::info!("Processing task {}: {:?}", task_id, task.task_type);
-                let result = process_task(&bot_clone, &task, &pending_conversions).await;
+                let result = process_task(&bot_clone, &task, &pending_conversions, &task_statuses_for_progress).await;
 
                 match &result {
                     Ok(_) => log::info!("Task {} completed successfully", task_id),
@@ -369,13 +370,14 @@ async fn process_task(
     bot: &Bot,
     task: &Task,
     pending_conversions: &Arc<Mutex<HashMap<String, PendingConversion>>>,
+    task_statuses: &Arc<Mutex<HashMap<TaskId, QueuedTaskInfo>>>,
 ) -> Result<(), String> {
     match &task.task_type {
         TaskType::Download { url, quality } => {
-            process_download_task(bot, task, url, *quality, pending_conversions).await
+            process_download_task(bot, task, url, *quality, pending_conversions, task_statuses).await
         }
         TaskType::Convert { filename, format } => {
-            process_convert_task(bot, task, filename, format.clone()).await
+            process_convert_task(bot, task, filename, format.clone(), task_statuses).await
         }
     }
 }
@@ -387,8 +389,9 @@ async fn process_download_task(
     url: &str,
     quality: u32,
     pending_conversions: &Arc<Mutex<HashMap<String, PendingConversion>>>,
+    task_statuses: &Arc<Mutex<HashMap<TaskId, QueuedTaskInfo>>>,
 ) -> Result<(), String> {
-    use crate::video::youtube::download_video;
+    use crate::video::youtube::download_video_with_progress;
     use strum::IntoEnumIterator;
     use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
@@ -403,7 +406,27 @@ async fn process_download_task(
         )
         .await;
 
-    match download_video(url, &task.unique_file_id, Some(quality)).await {
+    // Create progress channel
+    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<u8>();
+
+    // Spawn progress updater
+    let task_id = task.id.clone();
+    let task_statuses_clone = task_statuses.clone();
+    let progress_task = tokio::spawn(async move {
+        while let Some(progress) = progress_rx.recv().await {
+            let mut statuses = task_statuses_clone.lock().await;
+            if let Some(info) = statuses.get_mut(&task_id) {
+                info.progress = Some(progress);
+            }
+        }
+    });
+
+    let result = download_video_with_progress(url, &task.unique_file_id, Some(quality), Some(progress_tx)).await;
+
+    // Stop progress task
+    progress_task.abort();
+
+    match result {
         Ok(filename) => {
             log::info!("Downloaded file: {}", filename);
 
@@ -466,6 +489,7 @@ async fn process_convert_task(
     task: &Task,
     filename: &str,
     format: MediaFormatType,
+    _task_statuses: &Arc<Mutex<HashMap<TaskId, QueuedTaskInfo>>>,
 ) -> Result<(), String> {
     use crate::video::convert::{convert_audio, convert_video_note};
     use crate::video::{VideoInfo, compress_video_with_progress};
