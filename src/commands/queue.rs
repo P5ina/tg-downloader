@@ -2,11 +2,17 @@ use std::sync::Arc;
 
 use teloxide::prelude::*;
 
-use crate::{errors::HandlerResult, queue::TaskQueue};
+use crate::{errors::HandlerResult, queue::{TaskQueue, TaskStatus}};
 
 pub async fn queue(bot: Bot, msg: Message, task_queue: Arc<TaskQueue>) -> HandlerResult {
     let pending = task_queue.pending_count();
     let user_tasks = task_queue.get_user_tasks(msg.chat.id).await;
+
+    // Filter only active tasks (queued or processing)
+    let active_tasks: Vec<_> = user_tasks
+        .into_iter()
+        .filter(|t| matches!(t.status, TaskStatus::Queued { .. } | TaskStatus::Processing))
+        .collect();
 
     let mut response = String::new();
 
@@ -17,19 +23,16 @@ pub async fn queue(bot: Bot, msg: Message, task_queue: Arc<TaskQueue>) -> Handle
         response.push_str("📊 Очередь пуста\n\n");
     }
 
-    // User's tasks
-    if user_tasks.is_empty() {
+    // User's active tasks
+    if active_tasks.is_empty() {
         response.push_str("У вас нет активных задач.");
     } else {
         response.push_str("Ваши задачи:\n");
-        for task in user_tasks {
+        for task in active_tasks {
             let status_emoji = match &task.status {
-                crate::queue::TaskStatus::Queued { position } => {
-                    format!("⏳ В очереди (позиция: {})", position)
-                }
-                crate::queue::TaskStatus::Processing => "🔄 Обрабатывается".to_string(),
-                crate::queue::TaskStatus::Completed => "✅ Завершено".to_string(),
-                crate::queue::TaskStatus::Failed(e) => format!("❌ Ошибка: {}", e),
+                TaskStatus::Queued { .. } => "⏳ Ожидает".to_string(),
+                TaskStatus::Processing => "🔄 Обрабатывается".to_string(),
+                _ => continue,
             };
 
             let task_type = if task.task_type.starts_with("download") {
