@@ -39,5 +39,9 @@ COPY --from=builder /app/target/release/tg-downloader /usr/local/bin/app
 
 VOLUME ["/bot-api-data"]
 
+# Рабочая директория для данных (БД, видео)
+WORKDIR /data
+RUN mkdir -p /data
+
 # По умолчанию запускаем приложение
 CMD ["app"]
