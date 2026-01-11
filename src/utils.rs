@@ -15,25 +15,33 @@ use crate::video::ProgressInfo;
 pub fn is_youtube_video_link(url: &str) -> bool {
     let url = url.trim().to_lowercase();
 
-    let is_youtube_domain = url.starts_with("https://www.youtube.com/watch?")
+    // Regular watch links
+    let is_watch_link = url.starts_with("https://www.youtube.com/watch?")
         || url.starts_with("http://www.youtube.com/watch?")
         || url.starts_with("https://youtube.com/watch?")
-        || url.starts_with("http://youtube.com/watch?")
-        || url.starts_with("https://youtu.be/")
+        || url.starts_with("http://youtube.com/watch?");
+
+    // Short links (youtu.be)
+    let is_short_link = url.starts_with("https://youtu.be/")
         || url.starts_with("http://youtu.be/");
 
-    if !is_youtube_domain {
-        return false;
-    }
+    // Shorts links
+    let is_shorts_link = url.starts_with("https://www.youtube.com/shorts/")
+        || url.starts_with("http://www.youtube.com/shorts/")
+        || url.starts_with("https://youtube.com/shorts/")
+        || url.starts_with("http://youtube.com/shorts/");
 
-    // Проверим наличие параметра v= (для youtube.com/watch?v=)
-    if url.contains("youtube.com/watch?") {
+    if is_watch_link {
         return url.contains("v=") && url.find("v=").unwrap() < 100;
     }
 
-    // Для коротких ссылок youtu.be/ должно быть хотя бы что-то после слэша
-    if url.contains("youtu.be/") {
+    if is_short_link {
         let parts: Vec<&str> = url.split("youtu.be/").collect();
+        return parts.len() == 2 && !parts[1].is_empty();
+    }
+
+    if is_shorts_link {
+        let parts: Vec<&str> = url.split("/shorts/").collect();
         return parts.len() == 2 && !parts[1].is_empty();
     }
 
