@@ -1,15 +1,22 @@
-# 🏗 Этап сборки
-FROM rust:1.87 AS builder
-
+# 🍳 Этап подготовки рецепта
+FROM rust:1.87 AS chef
+RUN cargo install cargo-chef
 WORKDIR /app
 
-# Копируем файлы проекта
+# 📝 Создаём рецепт (только зависимости)
+FROM chef AS planner
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-# Кэшируем зависимости отдельно
-RUN cargo fetch
+# 🏗 Этап сборки
+FROM chef AS builder
 
-# Собираем release
+# Сначала собираем только зависимости (кэшируется!)
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Теперь копируем код и собираем приложение
+COPY . .
 RUN cargo build --release
 
 # 🏁 Финальный этап
