@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use log::info;
+use strum::IntoEnumIterator;
 use teloxide::{
     prelude::*,
     types::MaybeInaccessibleMessage,
@@ -9,11 +9,12 @@ use teloxide::{
 use crate::{
     errors::{BotError, HandlerResult},
     queue::{Task, TaskId, TaskQueue, TaskType},
+    utils::MediaFormatType,
 };
 
-/// Handle quality selection callback
-/// Callback format: q:task_id:url:height
-pub async fn quality_received(
+/// Handle format selection callback from queue-based download
+/// Callback format: fmt:format_index:task_id:filename
+pub async fn format_callback_received(
     bot: Bot,
     query: CallbackQuery,
     task_queue: Arc<TaskQueue>,
@@ -39,51 +40,57 @@ pub async fn quality_received(
 
     bot.answer_callback_query(&query.id).await?;
 
-    // Parse callback data: q:task_id:url:height
-    let stripped = data.strip_prefix("q:").ok_or_else(|| {
-        BotError::general(format!("Invalid quality callback: {}", data))
+    // Parse callback data: fmt:format_index:task_id:filename
+    let stripped = data.strip_prefix("fmt:").ok_or_else(|| {
+        BotError::general(format!("Invalid format callback: {}", data))
     })?;
 
+    // Split into parts: format_index:task_id:filename
     let parts: Vec<&str> = stripped.splitn(3, ':').collect();
     if parts.len() != 3 {
         return Err(BotError::general(format!(
-            "Invalid quality callback structure: {}",
+            "Invalid format callback structure: {}",
             data
         )));
     }
 
-    let task_id = TaskId(parts[0].to_string());
-    let url = parts[1].to_string();
-    let height: u32 = parts[2].parse().map_err(|_| {
-        BotError::general(format!("Invalid quality: {}", parts[2]))
+    let format_index: usize = parts[0].parse().map_err(|_| {
+        BotError::general(format!("Invalid format index: {}", parts[0]))
     })?;
+    let task_id_str = parts[1];
+    let filename = parts[2];
 
-    info!("User selected quality: {}p for URL: {}", height, url);
+    // Get format from index
+    let format = MediaFormatType::iter()
+        .nth(format_index)
+        .ok_or_else(|| BotError::general(format!("Invalid format index: {}", format_index)))?;
 
-    let unique_file_id = format!("chat{}_msg{}", chat_id, message_id);
+    log::info!(
+        "Format callback: format={:?}, task_id={}, filename={}",
+        format,
+        task_id_str,
+        filename
+    );
 
-    // Create download task
+    // Create conversion task
     let task = Task {
-        id: task_id,
-        task_type: TaskType::Download {
-            url,
-            quality: height,
+        id: TaskId(task_id_str.to_string()),
+        task_type: TaskType::Convert {
+            filename: filename.to_string(),
+            format,
         },
         chat_id,
         message_id,
-        unique_file_id,
+        unique_file_id: format!("chat{}_msg{}", chat_id, message_id),
     };
 
     // Submit to queue
     match task_queue.submit(task).await {
         Ok(position) => {
             let queue_msg = if position > 1 {
-                format!(
-                    "⏳ Задача добавлена в очередь (позиция: {})\nСкачиваем видео в {}p...",
-                    position, height
-                )
+                format!("⏳ Задача добавлена в очередь (позиция: {})", position)
             } else {
-                format!("⏳ Скачиваем видео в {}p...", height)
+                "📤 Обрабатываем...".to_string()
             };
 
             if let MaybeInaccessibleMessage::Regular(m) = &message {
@@ -91,7 +98,7 @@ pub async fn quality_received(
             }
         }
         Err(e) => {
-            log::error!("Failed to submit task: {}", e);
+            log::error!("Failed to submit conversion task: {}", e);
             if let MaybeInaccessibleMessage::Regular(m) = &message {
                 let _ = bot
                     .edit_message_text(chat_id, m.id, "❌ Ошибка добавления в очередь")

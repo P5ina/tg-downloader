@@ -10,7 +10,7 @@ use teloxide::{
 use crate::{
     commands::*,
     errors::BotError,
-    handlers::{duplicated_link_received, format_received, link_received, quality_received, video_received},
+    handlers::{format_callback_received, format_received, link_received, quality_received, video_received},
     utils::is_youtube_video_link,
 };
 
@@ -20,9 +20,7 @@ pub type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub enum State {
     #[default]
     Start,
-    ReceiveQuality {
-        url: String,
-    },
+    /// Legacy state for direct video upload format selection
     ReceiveFormat {
         filename: String,
     },
@@ -37,6 +35,16 @@ enum Command {
     Cancel,
 }
 
+/// Check if callback data is a format selection from queue (fmt:...)
+fn is_format_callback(data: &str) -> bool {
+    data.starts_with("fmt:")
+}
+
+/// Check if callback data is a quality selection (q:...)
+fn is_quality_callback(data: &str) -> bool {
+    data.starts_with("q:")
+}
+
 pub fn schema() -> UpdateHandler<BotError> {
     use dptree::case;
 
@@ -48,21 +56,13 @@ pub fn schema() -> UpdateHandler<BotError> {
                     // Filter for commands
                     teloxide::filter_command::<Command, _>()
                         .branch(case![State::Start].branch(case![Command::Start].endpoint(start)))
-                        .branch(case![Command::Cancel].endpoint(cancel)), // .branch(case![Command::Cancel].endpoint(cancel)),
+                        .branch(case![Command::Cancel].endpoint(cancel)),
                 )
-                // Filter for the youtube links
+                // Filter for the youtube links - now accepts links in any state
                 .branch(
                     Message::filter_text()
                         .filter(|text: String| is_youtube_video_link(&text))
-                        .branch(case![State::Start].endpoint(link_received))
-                        .branch(
-                            case![State::ReceiveQuality { url }]
-                                .endpoint(duplicated_link_received),
-                        )
-                        .branch(
-                            case![State::ReceiveFormat { filename }]
-                                .endpoint(duplicated_link_received),
-                        ),
+                        .endpoint(link_received),
                 )
                 .branch(
                     Message::filter_video()
@@ -77,7 +77,21 @@ pub fn schema() -> UpdateHandler<BotError> {
         )
         .branch(
             Update::filter_callback_query()
-                .branch(case![State::ReceiveQuality { url }].endpoint(quality_received))
+                // Handle quality selection from queue (q:task_id:url:height)
+                .branch(
+                    dptree::filter(|q: CallbackQuery| {
+                        q.data.as_ref().map(|d| is_quality_callback(d)).unwrap_or(false)
+                    })
+                    .endpoint(quality_received),
+                )
+                // Handle format selection from queue (fmt:format_index:task_id:filename)
+                .branch(
+                    dptree::filter(|q: CallbackQuery| {
+                        q.data.as_ref().map(|d| is_format_callback(d)).unwrap_or(false)
+                    })
+                    .endpoint(format_callback_received),
+                )
+                // Legacy handler for direct video upload format selection
                 .branch(case![State::ReceiveFormat { filename }].endpoint(format_received)),
         )
 }

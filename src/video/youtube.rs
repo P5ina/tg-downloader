@@ -17,14 +17,6 @@ impl VideoQuality {
         let label = format!("{}p", height);
         Self { height, label }
     }
-
-    pub fn callback_data(&self) -> String {
-        format!("quality:{}", self.height)
-    }
-
-    pub fn from_callback_data(data: &str) -> Option<u32> {
-        data.strip_prefix("quality:").and_then(|h| h.parse().ok())
-    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -9,9 +9,8 @@ pub async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
     if let Some(state) = state_or_none {
         match state {
             crate::schema::State::Start => (),
-            crate::schema::State::ReceiveQuality { .. } => (),
             crate::schema::State::ReceiveFormat { filename } => {
-                fs::remove_file(filename).await?;
+                let _ = fs::remove_file(filename).await;
             }
         }
     }

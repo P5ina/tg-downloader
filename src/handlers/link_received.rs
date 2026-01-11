@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use teloxide::{
     prelude::*,
     types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode},
@@ -5,14 +7,18 @@ use teloxide::{
 
 use crate::{
     errors::{BotError, HandlerResult},
-    schema::{MyDialogue, State},
+    queue::{TaskId, TaskQueue},
     video::youtube::{
         MAX_VIDEO_DURATION_SECONDS, format_duration, get_available_qualities, get_video_duration,
         is_video_too_long,
     },
 };
 
-pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+pub async fn link_received(
+    bot: Bot,
+    msg: Message,
+    task_queue: Arc<TaskQueue>,
+) -> HandlerResult {
     let text = msg.text().ok_or_else(|| {
         BotError::general("Text should be here. It's invalid state")
     })?;
@@ -50,7 +56,7 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
     match get_available_qualities(text).await {
         Ok(qualities) => {
             log::info!("Found {} quality options", qualities.len());
-            send_quality_message(&bot, &dialogue, &msg, text, &qualities).await?;
+            send_quality_message(&bot, &msg, text, &qualities, &task_queue).await?;
         }
         Err(e) => {
             log::error!("Failed to get video qualities: {e}");
@@ -67,15 +73,22 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
 
 async fn send_quality_message(
     bot: &Bot,
-    dialogue: &MyDialogue,
     msg: &Message,
     url: &str,
     qualities: &[crate::video::VideoQuality],
+    _task_queue: &Arc<TaskQueue>,
 ) -> HandlerResult {
-    // Create quality buttons (2 per row)
+    // Create a unique task ID for this download request
+    let task_id = TaskId::new();
+
+    // Create quality buttons with encoded task info: q:task_id:url:quality
     let buttons: Vec<InlineKeyboardButton> = qualities
         .iter()
-        .map(|q| InlineKeyboardButton::callback(&q.label, q.callback_data()))
+        .map(|q| {
+            // Encode: q:task_id:url:height
+            let callback = format!("q:{}:{}:{}", task_id, url, q.height);
+            InlineKeyboardButton::callback(&q.label, callback)
+        })
         .collect();
 
     let mut keyboard = InlineKeyboardMarkup::default();
@@ -83,19 +96,20 @@ async fn send_quality_message(
         keyboard = keyboard.append_row(chunk.to_vec());
     }
 
+    // Show queue status if there are pending tasks
+    let queue_size = _task_queue.queue_size();
+    let queue_info = if queue_size > 0 {
+        format!("\n\n📊 В очереди сейчас {} задач", queue_size)
+    } else {
+        String::new()
+    };
+
     bot.send_message(
         msg.chat.id,
-        "🎬 Выбери качество видео:",
+        format!("🎬 Выбери качество видео:{}", queue_info),
     )
     .reply_markup(keyboard)
     .await?;
-
-    dialogue
-        .update(State::ReceiveQuality {
-            url: url.to_owned(),
-        })
-        .await
-        .map_err(|e| BotError::general(format!("Failed to update dialogue: {}", e)))?;
 
     Ok(())
 }
