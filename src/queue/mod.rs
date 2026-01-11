@@ -284,7 +284,13 @@ impl TaskQueue {
 
             // Spawn task handler
             tokio::spawn(async move {
+                log::info!("Processing task {}: {:?}", task_id, task.task_type);
                 let result = process_task(&bot_clone, &task, &pending_conversions).await;
+
+                match &result {
+                    Ok(_) => log::info!("Task {} completed successfully", task_id),
+                    Err(e) => log::error!("Task {} failed: {}", task_id, e),
+                }
 
                 // Update status based on result
                 {
@@ -345,6 +351,8 @@ async fn process_download_task(
     use crate::video::youtube::download_video;
     use strum::IntoEnumIterator;
     use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+
+    log::info!("Starting download task: {} at {}p", url, quality);
 
     // Update message to show downloading
     let _ = bot

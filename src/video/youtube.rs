@@ -152,20 +152,26 @@ pub async fn download_video(url: &str, unique_id: &str, max_height: Option<u32>)
     let mut cmd = build_base_command(url, max_height);
     let cmd2: &mut process::Command = cmd
         .args(["--no-simulate"])
-        .args(["-o", &get_output_format(unique_id)]);
+        .args(["-o", &get_output_format(unique_id)])
+        .args(["--print", "after_move:filepath"]);
+
+    info!("Starting download: {} (quality: {:?})", url, max_height);
+    info!("Running command: {:?}", cmd2);
+
     let output = cmd2
-        .args(["--print", "after_move:filepath"])
-        .args(["-q", "--no-warnings"])
         .output()
         .await
         .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
-    info!("Running command {:?}", cmd2);
+
+    info!("yt-dlp exit code: {:?}", output.status.code());
 
     if output.status.success() {
         let filename = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        info!("Download successful: {}", filename);
         Ok(filename)
     } else {
         let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+        log::error!("yt-dlp failed: {}", stderr_str);
         Err(BotError::youtube_error(stderr_str))
     }
 }
