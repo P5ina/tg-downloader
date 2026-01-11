@@ -27,8 +27,8 @@ async fn main() {
     let bot = Bot::from_env();
 
     // Initialize the subscription manager
-    let database_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:subscriptions.db".to_string());
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "sqlite:subscriptions.db?mode=rwc".to_string());
     let subscription_manager = Arc::new(
         SubscriptionManager::new(&database_url)
             .await
