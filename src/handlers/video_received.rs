@@ -20,7 +20,7 @@ pub async fn video_received(
 
     let unique_id = get_unique_file_id(msg.clone());
     let container_path = "/var/lib/telegram-bot-api";
-    let host_path = "bot-api-data";
+    let host_path = "/bot-api-data";
     let local_path = file.path.replace(container_path, host_path);
     let telegram_path = Path::new(&local_path);
     let output_path = replace_path_keep_extension_inplace(
@@ -28,10 +28,15 @@ pub async fn video_received(
         "videos",
         &format!("custom_{unique_id}"),
     );
-    log::debug!("Starting downloading video... {}", telegram_path.display());
-    let download_result = fs::copy(local_path, &output_path).await;
+    log::info!(
+        "Downloading video: file.path={}, local_path={}, output_path={}",
+        file.path,
+        local_path,
+        output_path.display()
+    );
+    let download_result = fs::copy(&local_path, &output_path).await;
     if let Err(e) = download_result {
-        log::error!("Error downloading file: {:?}", e);
+        log::error!("Error downloading file from {} to {}: {:?}", local_path, output_path.display(), e);
         bot.send_message(
             msg.chat.id,
             "⚠️ Мы не смогли скачать ваше видео, попробуйте еще раз.",

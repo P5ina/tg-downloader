@@ -4,9 +4,14 @@ services:
     environment:
       TELOXIDE_TOKEN: ${TELOXIDE_TOKEN}
       TELOXIDE_API_URL: ${TELOXIDE_API_URL}
+      ADMIN_ID: ${ADMIN_ID}
       RUST_LOG: INFO
     volumes:
       - ./bot-api-data:/bot-api-data
+      - ./bot-data:/data
+    depends_on:
+      - telegram-bot-api
+    restart: unless-stopped
   telegram-bot-api:
     image: aiogram/telegram-bot-api:latest
     container_name: telegram-bot-api

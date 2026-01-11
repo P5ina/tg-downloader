@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use teloxide::{
     ApiError, RequestError,
     prelude::*,
-    types::{InputFile, MaybeInaccessibleMessage, ParseMode},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, InputFile, MaybeInaccessibleMessage, ParseMode},
 };
 use tokio::fs;
 use tokio::sync::mpsc;
@@ -13,6 +13,10 @@ use tokio::sync::mpsc;
 use crate::{
     errors::{BotError, ConversionError, HandlerResult},
     schema::MyDialogue,
+    subscription::{
+        premium::{is_premium_format, SUBSCRIPTION_DAYS, SUBSCRIPTION_PRICE_STARS},
+        SubscriptionManager,
+    },
     utils::{
         MediaFormatType, compression_loading_screen_with_progress, loading_screen_with_progress,
     },
@@ -25,6 +29,7 @@ pub async fn format_received(
     dialogue: MyDialogue,
     filename: String,
     query: CallbackQuery,
+    subscription_manager: Arc<SubscriptionManager>,
 ) -> HandlerResult {
     if let Some(s) = &query.data {
         let message = query
@@ -34,9 +39,35 @@ pub async fn format_received(
             MaybeInaccessibleMessage::Inaccessible(ref m) => m.chat.id,
             MaybeInaccessibleMessage::Regular(ref m) => m.chat.id,
         };
-        bot.answer_callback_query(&query.id).await?;
+        bot.answer_callback_query(query.id.clone()).await?;
 
         let media_format = MediaFormatType::from_str(s)?;
+
+        // Check if this is a premium format and user has subscription
+        if is_premium_format(&media_format) {
+            let user_id = query.from.id.0 as i64;
+            if !subscription_manager.is_subscribed(user_id).await {
+                // User doesn't have premium - show upgrade message
+                let text = format!(
+                    "<b>Эта функция доступна только с Premium-подпиской</b>\n\n\
+                    Конвертация в {} требует подписки.\n\n\
+                    Стоимость: <b>{} Stars</b> за {} дней",
+                    media_format, SUBSCRIPTION_PRICE_STARS, SUBSCRIPTION_DAYS
+                );
+
+                let keyboard = InlineKeyboardMarkup::new(vec![vec![
+                    InlineKeyboardButton::callback("Купить Premium", "buy_premium"),
+                ]]);
+
+                if let MaybeInaccessibleMessage::Regular(m) = &message {
+                    bot.edit_message_text(chat_id, m.id, text)
+                        .parse_mode(ParseMode::Html)
+                        .reply_markup(keyboard)
+                        .await?;
+                }
+                return Ok(());
+            }
+        }
         log::info!("Found media format {:?}", media_format);
 
         // Для видео формата сразу отправляем без конвертации
