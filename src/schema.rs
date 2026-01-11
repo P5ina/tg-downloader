@@ -58,77 +58,79 @@ fn is_buy_premium_callback(data: &str) -> bool {
 pub fn schema() -> UpdateHandler<BotError> {
     use dptree::case;
 
-    dialogue::enter::<Update, InMemStorage<State>, State, _>()
+    dptree::entry()
+        // Handle pre-checkout queries (outside of dialogue)
+        .branch(Update::filter_pre_checkout_query().endpoint(handle_pre_checkout_query))
+        // Everything else goes through dialogue
         .branch(
-            // Filter for messages
-            Update::filter_message()
+            dialogue::enter::<Update, InMemStorage<State>, State, _>()
                 .branch(
-                    // Filter for commands
-                    teloxide::filter_command::<Command, _>()
-                        .branch(case![Command::Start].endpoint(start))
-                        .branch(case![Command::Cancel].endpoint(cancel))
-                        .branch(case![Command::Queue].endpoint(queue))
-                        .branch(case![Command::Premium].endpoint(premium)),
+                    // Filter for messages
+                    Update::filter_message()
+                        .branch(
+                            // Filter for commands
+                            teloxide::filter_command::<Command, _>()
+                                .branch(case![Command::Start].endpoint(start))
+                                .branch(case![Command::Cancel].endpoint(cancel))
+                                .branch(case![Command::Queue].endpoint(queue))
+                                .branch(case![Command::Premium].endpoint(premium)),
+                        )
+                        // Filter for the youtube links - now accepts links in any state
+                        .branch(
+                            Message::filter_text()
+                                .filter(|text: String| is_youtube_video_link(&text))
+                                .endpoint(link_received),
+                        )
+                        .branch(
+                            Message::filter_video()
+                                .filter(|msg: Message| {
+                                    // Skip if message contains YouTube link (it's just a preview)
+                                    msg.text()
+                                        .map(|t| !is_youtube_video_link(t))
+                                        .unwrap_or(true)
+                                })
+                                .endpoint(video_received),
+                        )
+                        // Handle successful payment
+                        .branch(
+                            dptree::filter(|msg: Message| msg.successful_payment().is_some())
+                                .endpoint(handle_successful_payment),
+                        ),
                 )
-                // Filter for the youtube links - now accepts links in any state
                 .branch(
-                    Message::filter_text()
-                        .filter(|text: String| is_youtube_video_link(&text))
-                        .endpoint(link_received),
-                )
-                .branch(
-                    Message::filter_video()
-                        .filter(|msg: Message| {
-                            // Skip if message contains YouTube link (it's just a preview)
-                            msg.text()
-                                .map(|t| !is_youtube_video_link(t))
-                                .unwrap_or(true)
-                        })
-                        .endpoint(video_received),
-                )
-                // Handle successful payment
-                .branch(
-                    dptree::filter(|msg: Message| msg.successful_payment().is_some())
-                        .endpoint(handle_successful_payment),
+                    Update::filter_callback_query()
+                        // Handle buy premium callback
+                        .branch(
+                            dptree::filter(|q: CallbackQuery| {
+                                q.data
+                                    .as_ref()
+                                    .map(|d| is_buy_premium_callback(d))
+                                    .unwrap_or(false)
+                            })
+                            .endpoint(handle_buy_premium_callback),
+                        )
+                        // Handle quality selection from queue (q:task_id:url:height)
+                        .branch(
+                            dptree::filter(|q: CallbackQuery| {
+                                q.data
+                                    .as_ref()
+                                    .map(|d| is_quality_callback(d))
+                                    .unwrap_or(false)
+                            })
+                            .endpoint(quality_received),
+                        )
+                        // Handle format selection from queue (fmt:format_index:task_id:filename)
+                        .branch(
+                            dptree::filter(|q: CallbackQuery| {
+                                q.data
+                                    .as_ref()
+                                    .map(|d| is_format_callback(d))
+                                    .unwrap_or(false)
+                            })
+                            .endpoint(format_callback_received),
+                        )
+                        // Legacy handler for direct video upload format selection
+                        .branch(case![State::ReceiveFormat { filename }].endpoint(format_received)),
                 ),
-        )
-        .branch(
-            // Handle pre-checkout queries
-            Update::filter_pre_checkout_query().endpoint(handle_pre_checkout_query),
-        )
-        .branch(
-            Update::filter_callback_query()
-                // Handle buy premium callback
-                .branch(
-                    dptree::filter(|q: CallbackQuery| {
-                        q.data
-                            .as_ref()
-                            .map(|d| is_buy_premium_callback(d))
-                            .unwrap_or(false)
-                    })
-                    .endpoint(handle_buy_premium_callback),
-                )
-                // Handle quality selection from queue (q:task_id:url:height)
-                .branch(
-                    dptree::filter(|q: CallbackQuery| {
-                        q.data
-                            .as_ref()
-                            .map(|d| is_quality_callback(d))
-                            .unwrap_or(false)
-                    })
-                    .endpoint(quality_received),
-                )
-                // Handle format selection from queue (fmt:format_index:task_id:filename)
-                .branch(
-                    dptree::filter(|q: CallbackQuery| {
-                        q.data
-                            .as_ref()
-                            .map(|d| is_format_callback(d))
-                            .unwrap_or(false)
-                    })
-                    .endpoint(format_callback_received),
-                )
-                // Legacy handler for direct video upload format selection
-                .branch(case![State::ReceiveFormat { filename }].endpoint(format_received)),
         )
 }
