@@ -64,7 +64,16 @@ pub fn schema() -> UpdateHandler<BotError> {
                                 .endpoint(duplicated_link_received),
                         ),
                 )
-                .branch(Message::filter_video().endpoint(video_received)),
+                .branch(
+                    Message::filter_video()
+                        .filter(|msg: Message| {
+                            // Skip if message contains YouTube link (it's just a preview)
+                            msg.text()
+                                .map(|t| !is_youtube_video_link(t))
+                                .unwrap_or(true)
+                        })
+                        .endpoint(video_received),
+                ),
         )
         .branch(
             Update::filter_callback_query()
