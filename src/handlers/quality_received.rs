@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Handle quality selection callback
-/// Callback format: q:task_id:url:height
+/// Callback format: q:short_id:height
 pub async fn quality_received(
     bot: Bot,
     query: CallbackQuery,
@@ -39,34 +39,38 @@ pub async fn quality_received(
 
     bot.answer_callback_query(&query.id).await?;
 
-    // Parse callback data: q:task_id:url:height
+    // Parse callback data: q:short_id:height
     let stripped = data.strip_prefix("q:").ok_or_else(|| {
         BotError::general(format!("Invalid quality callback: {}", data))
     })?;
 
-    let parts: Vec<&str> = stripped.splitn(3, ':').collect();
-    if parts.len() != 3 {
+    let parts: Vec<&str> = stripped.splitn(2, ':').collect();
+    if parts.len() != 2 {
         return Err(BotError::general(format!(
             "Invalid quality callback structure: {}",
             data
         )));
     }
 
-    let task_id = TaskId(parts[0].to_string());
-    let url = parts[1].to_string();
-    let height: u32 = parts[2].parse().map_err(|_| {
-        BotError::general(format!("Invalid quality: {}", parts[2]))
+    let short_id = parts[0];
+    let height: u32 = parts[1].parse().map_err(|_| {
+        BotError::general(format!("Invalid quality: {}", parts[1]))
     })?;
 
-    info!("User selected quality: {}p for URL: {}", height, url);
+    // Get URL from pending downloads
+    let pending = task_queue.take_pending_download(short_id).await.ok_or_else(|| {
+        BotError::general("Download session expired. Please send the link again.")
+    })?;
+
+    info!("User selected quality: {}p for URL: {}", height, pending.url);
 
     let unique_file_id = format!("chat{}_msg{}", chat_id, message_id);
 
     // Create download task
     let task = Task {
-        id: task_id,
+        id: TaskId::new(),
         task_type: TaskType::Download {
-            url,
+            url: pending.url,
             quality: height,
         },
         chat_id,

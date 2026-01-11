@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// Handle format selection callback from queue-based download
-/// Callback format: fmt:format_index:task_id:filename
+/// Callback format: fmt:format_index:short_id
 pub async fn format_callback_received(
     bot: Bot,
     query: CallbackQuery,
@@ -40,14 +40,14 @@ pub async fn format_callback_received(
 
     bot.answer_callback_query(&query.id).await?;
 
-    // Parse callback data: fmt:format_index:task_id:filename
+    // Parse callback data: fmt:format_index:short_id
     let stripped = data.strip_prefix("fmt:").ok_or_else(|| {
         BotError::general(format!("Invalid format callback: {}", data))
     })?;
 
-    // Split into parts: format_index:task_id:filename
-    let parts: Vec<&str> = stripped.splitn(3, ':').collect();
-    if parts.len() != 3 {
+    // Split into parts: format_index:short_id
+    let parts: Vec<&str> = stripped.splitn(2, ':').collect();
+    if parts.len() != 2 {
         return Err(BotError::general(format!(
             "Invalid format callback structure: {}",
             data
@@ -57,26 +57,29 @@ pub async fn format_callback_received(
     let format_index: usize = parts[0].parse().map_err(|_| {
         BotError::general(format!("Invalid format index: {}", parts[0]))
     })?;
-    let task_id_str = parts[1];
-    let filename = parts[2];
+    let short_id = parts[1];
 
     // Get format from index
     let format = MediaFormatType::iter()
         .nth(format_index)
         .ok_or_else(|| BotError::general(format!("Invalid format index: {}", format_index)))?;
 
+    // Get pending conversion data
+    let pending = task_queue.take_pending_conversion(short_id).await.ok_or_else(|| {
+        BotError::general("Conversion session expired. Please download the video again.")
+    })?;
+
     log::info!(
-        "Format callback: format={:?}, task_id={}, filename={}",
+        "Format callback: format={:?}, filename={}",
         format,
-        task_id_str,
-        filename
+        pending.filename
     );
 
     // Create conversion task
     let task = Task {
-        id: TaskId(task_id_str.to_string()),
+        id: TaskId::new(),
         task_type: TaskType::Convert {
-            filename: filename.to_string(),
+            filename: pending.filename,
             format,
         },
         chat_id,

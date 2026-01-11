@@ -11,6 +11,39 @@ use crate::utils::MediaFormatType;
 /// Maximum number of concurrent tasks (downloads + conversions)
 const MAX_CONCURRENT_TASKS: usize = 2;
 
+/// Short ID for callback data (8 chars max)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ShortId(pub String);
+
+impl ShortId {
+    pub fn new() -> Self {
+        // Use first 8 chars of UUID for short callback-safe ID
+        Self(uuid::Uuid::new_v4().to_string()[..8].to_string())
+    }
+}
+
+impl std::fmt::Display for ShortId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Pending download waiting for quality selection
+#[derive(Debug, Clone)]
+pub struct PendingDownload {
+    pub url: String,
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+}
+
+/// Pending conversion waiting for format selection
+#[derive(Debug, Clone)]
+pub struct PendingConversion {
+    pub filename: String,
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+}
+
 /// Unique task identifier
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TaskId(pub String);
@@ -18,6 +51,10 @@ pub struct TaskId(pub String);
 impl TaskId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
+    }
+
+    pub fn from_short(short: &ShortId) -> Self {
+        Self(short.0.clone())
     }
 }
 
@@ -87,6 +124,10 @@ pub struct TaskQueue {
     task_statuses: Arc<Mutex<HashMap<TaskId, QueuedTaskInfo>>>,
     /// Current queue size
     queue_size: Arc<AtomicUsize>,
+    /// Pending downloads waiting for quality selection (short_id -> PendingDownload)
+    pending_downloads: Arc<Mutex<HashMap<String, PendingDownload>>>,
+    /// Pending conversions waiting for format selection (short_id -> PendingConversion)
+    pending_conversions: Arc<Mutex<HashMap<String, PendingConversion>>>,
 }
 
 impl TaskQueue {
@@ -97,6 +138,8 @@ impl TaskQueue {
         let user_tasks = Arc::new(Mutex::new(HashMap::new()));
         let task_statuses = Arc::new(Mutex::new(HashMap::new()));
         let queue_size = Arc::new(AtomicUsize::new(0));
+        let pending_downloads = Arc::new(Mutex::new(HashMap::new()));
+        let pending_conversions = Arc::new(Mutex::new(HashMap::new()));
 
         let queue = Arc::new(Self {
             sender,
@@ -105,6 +148,8 @@ impl TaskQueue {
             user_tasks,
             task_statuses,
             queue_size,
+            pending_downloads,
+            pending_conversions,
         });
 
         // Start the worker
@@ -114,6 +159,48 @@ impl TaskQueue {
         });
 
         queue
+    }
+
+    /// Store a pending download and return short ID for callback
+    pub async fn add_pending_download(&self, url: String, chat_id: ChatId, message_id: MessageId) -> ShortId {
+        let short_id = ShortId::new();
+        let pending = PendingDownload {
+            url,
+            chat_id,
+            message_id,
+        };
+
+        let mut pending_downloads = self.pending_downloads.lock().await;
+        pending_downloads.insert(short_id.0.clone(), pending);
+
+        short_id
+    }
+
+    /// Get and remove a pending download by short ID
+    pub async fn take_pending_download(&self, short_id: &str) -> Option<PendingDownload> {
+        let mut pending_downloads = self.pending_downloads.lock().await;
+        pending_downloads.remove(short_id)
+    }
+
+    /// Store a pending conversion and return short ID for callback
+    pub async fn add_pending_conversion(&self, filename: String, chat_id: ChatId, message_id: MessageId) -> ShortId {
+        let short_id = ShortId::new();
+        let pending = PendingConversion {
+            filename,
+            chat_id,
+            message_id,
+        };
+
+        let mut pending_conversions = self.pending_conversions.lock().await;
+        pending_conversions.insert(short_id.0.clone(), pending);
+
+        short_id
+    }
+
+    /// Get and remove a pending conversion by short ID
+    pub async fn take_pending_conversion(&self, short_id: &str) -> Option<PendingConversion> {
+        let mut pending_conversions = self.pending_conversions.lock().await;
+        pending_conversions.remove(short_id)
     }
 
     /// Submit a task to the queue
@@ -196,10 +283,11 @@ impl TaskQueue {
             let task_id = task.id.clone();
             let task_statuses = self.task_statuses.clone();
             let user_tasks = self.user_tasks.clone();
+            let pending_conversions = self.pending_conversions.clone();
 
             // Spawn task handler
             tokio::spawn(async move {
-                let result = process_task(&bot_clone, &task).await;
+                let result = process_task(&bot_clone, &task, &pending_conversions).await;
 
                 // Update status based on result
                 {
@@ -234,10 +322,14 @@ impl TaskQueue {
 }
 
 /// Process a single task
-async fn process_task(bot: &Bot, task: &Task) -> Result<(), String> {
+async fn process_task(
+    bot: &Bot,
+    task: &Task,
+    pending_conversions: &Arc<Mutex<HashMap<String, PendingConversion>>>,
+) -> Result<(), String> {
     match &task.task_type {
         TaskType::Download { url, quality } => {
-            process_download_task(bot, task, url, *quality).await
+            process_download_task(bot, task, url, *quality, pending_conversions).await
         }
         TaskType::Convert { filename, format } => {
             process_convert_task(bot, task, filename, format.clone()).await
@@ -251,6 +343,7 @@ async fn process_download_task(
     task: &Task,
     url: &str,
     quality: u32,
+    pending_conversions: &Arc<Mutex<HashMap<String, PendingConversion>>>,
 ) -> Result<(), String> {
     use crate::video::youtube::download_video;
     use strum::IntoEnumIterator;
@@ -269,14 +362,26 @@ async fn process_download_task(
         Ok(filename) => {
             log::info!("Downloaded file: {}", filename);
 
-            // Show format selection
-            // Callback format: fmt:format_index:task_id:filename
+            // Store pending conversion and get short ID
+            let short_id = ShortId::new();
+            {
+                let mut conversions = pending_conversions.lock().await;
+                conversions.insert(
+                    short_id.0.clone(),
+                    PendingConversion {
+                        filename: filename.clone(),
+                        chat_id: task.chat_id,
+                        message_id: task.message_id,
+                    },
+                );
+            }
+
+            // Show format selection with short callback: fmt:format_index:short_id
             let formats: Vec<InlineKeyboardButton> = MediaFormatType::iter()
                 .enumerate()
                 .map(|(idx, f)| {
                     let label = format!("{}", f);
-                    // Encode: fmt:format_index:task_id:filename
-                    let callback = format!("fmt:{}:{}:{}", idx, task.id, filename);
+                    let callback = format!("fmt:{}:{}", idx, short_id);
                     InlineKeyboardButton::callback(label, callback)
                 })
                 .collect();

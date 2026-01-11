@@ -7,7 +7,7 @@ use teloxide::{
 
 use crate::{
     errors::{BotError, HandlerResult},
-    queue::{TaskId, TaskQueue},
+    queue::TaskQueue,
     video::youtube::{
         MAX_VIDEO_DURATION_SECONDS, format_duration, get_available_qualities, get_video_duration,
         is_video_too_long,
@@ -76,17 +76,24 @@ async fn send_quality_message(
     msg: &Message,
     url: &str,
     qualities: &[crate::video::VideoQuality],
-    _task_queue: &Arc<TaskQueue>,
+    task_queue: &Arc<TaskQueue>,
 ) -> HandlerResult {
-    // Create a unique task ID for this download request
-    let task_id = TaskId::new();
+    // Send message first to get message_id
+    let sent_msg = bot
+        .send_message(msg.chat.id, "🎬 Загрузка...")
+        .await?;
 
-    // Create quality buttons with encoded task info: q:task_id:url:quality
+    // Store URL in pending downloads and get short ID
+    let short_id = task_queue
+        .add_pending_download(url.to_string(), msg.chat.id, sent_msg.id)
+        .await;
+
+    // Create quality buttons with short callback: q:short_id:height
+    // Total callback length: "q:" (2) + short_id (8) + ":" (1) + height (max 4) = max 15 chars
     let buttons: Vec<InlineKeyboardButton> = qualities
         .iter()
         .map(|q| {
-            // Encode: q:task_id:url:height
-            let callback = format!("q:{}:{}:{}", task_id, url, q.height);
+            let callback = format!("q:{}:{}", short_id, q.height);
             InlineKeyboardButton::callback(&q.label, callback)
         })
         .collect();
@@ -97,15 +104,16 @@ async fn send_quality_message(
     }
 
     // Show queue status if there are pending tasks
-    let queue_size = _task_queue.queue_size();
+    let queue_size = task_queue.queue_size();
     let queue_info = if queue_size > 0 {
         format!("\n\n📊 В очереди сейчас {} задач", queue_size)
     } else {
         String::new()
     };
 
-    bot.send_message(
+    bot.edit_message_text(
         msg.chat.id,
+        sent_msg.id,
         format!("🎬 Выбери качество видео:{}", queue_info),
     )
     .reply_markup(keyboard)
