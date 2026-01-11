@@ -65,7 +65,7 @@ pub fn schema() -> UpdateHandler<BotError> {
                 .branch(
                     // Filter for commands
                     teloxide::filter_command::<Command, _>()
-                        .branch(case![State::Start].branch(case![Command::Start].endpoint(start)))
+                        .branch(case![Command::Start].endpoint(start))
                         .branch(case![Command::Cancel].endpoint(cancel))
                         .branch(case![Command::Queue].endpoint(queue))
                         .branch(case![Command::Premium].endpoint(premium)),
