@@ -103,11 +103,12 @@ fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
     let mut cmd = process::Command::new("yt-dlp");
     cmd.arg("--no-playlist")
         .args(["--socket-timeout", "5", "--retries", "3"])
-        .args(["--merge-output-format", "mp4"])
-        // Force H.264 encoding for Telegram compatibility
+        // Force recode to mp4 with H.264 for Telegram/Apple compatibility
+        // --recode-video forces transcoding even for single-stream downloads
+        .args(["--recode-video", "mp4"])
         .args([
             "--postprocessor-args",
-            "ffmpeg_o:-c:v libx264 -preset medium -crf 18 -c:a aac -b:a 192k -movflags +faststart",
+            "VideoConvertor:-c:v libx264 -preset medium -crf 18 -c:a aac -b:a 192k -movflags +faststart",
         ]);
 
     // Apply quality filter if specified

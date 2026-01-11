@@ -116,7 +116,7 @@ pub async fn format_received(
 
         // Запускаем loading screen
         let should_stop_loading = Arc::new(AtomicBool::new(false));
-        let (progress_tx, progress_rx) = mpsc::unbounded_channel();
+        let (_progress_tx, progress_rx) = mpsc::unbounded_channel();
         let loading_task = {
             let bot_clone = bot.clone();
             let should_stop_clone = should_stop_loading.clone();
