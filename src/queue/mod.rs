@@ -116,14 +116,12 @@ pub struct TaskQueue {
     sender: mpsc::UnboundedSender<Task>,
     /// Semaphore to limit concurrent tasks
     semaphore: Arc<Semaphore>,
-    /// Current queue position counter
-    queue_counter: AtomicUsize,
     /// Track tasks per user for status queries
     user_tasks: Arc<Mutex<HashMap<ChatId, Vec<TaskId>>>>,
     /// Track task statuses
     task_statuses: Arc<Mutex<HashMap<TaskId, QueuedTaskInfo>>>,
-    /// Current queue size
-    queue_size: Arc<AtomicUsize>,
+    /// Number of tasks waiting in queue (not yet being processed)
+    pending_count: Arc<AtomicUsize>,
     /// Pending downloads waiting for quality selection (short_id -> PendingDownload)
     pending_downloads: Arc<Mutex<HashMap<String, PendingDownload>>>,
     /// Pending conversions waiting for format selection (short_id -> PendingConversion)
@@ -137,17 +135,16 @@ impl TaskQueue {
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_TASKS));
         let user_tasks = Arc::new(Mutex::new(HashMap::new()));
         let task_statuses = Arc::new(Mutex::new(HashMap::new()));
-        let queue_size = Arc::new(AtomicUsize::new(0));
+        let pending_count = Arc::new(AtomicUsize::new(0));
         let pending_downloads = Arc::new(Mutex::new(HashMap::new()));
         let pending_conversions = Arc::new(Mutex::new(HashMap::new()));
 
         let queue = Arc::new(Self {
             sender,
             semaphore,
-            queue_counter: AtomicUsize::new(0),
             user_tasks,
             task_statuses,
-            queue_size,
+            pending_count,
             pending_downloads,
             pending_conversions,
         });
@@ -205,8 +202,8 @@ impl TaskQueue {
 
     /// Submit a task to the queue
     pub async fn submit(&self, task: Task) -> Result<usize, String> {
-        let position = self.queue_counter.fetch_add(1, Ordering::SeqCst) + 1;
-        self.queue_size.fetch_add(1, Ordering::SeqCst);
+        // Position is number of tasks already waiting + 1
+        let position = self.pending_count.fetch_add(1, Ordering::SeqCst) + 1;
 
         // Track task for user
         {
@@ -241,9 +238,9 @@ impl TaskQueue {
         Ok(position)
     }
 
-    /// Get current queue size
-    pub fn queue_size(&self) -> usize {
-        self.queue_size.load(Ordering::SeqCst)
+    /// Get number of tasks waiting in queue
+    pub fn pending_count(&self) -> usize {
+        self.pending_count.load(Ordering::SeqCst)
     }
 
     /// Get tasks for a user
@@ -274,7 +271,7 @@ impl TaskQueue {
     async fn run_worker(&self, mut receiver: mpsc::UnboundedReceiver<Task>, bot: Bot) {
         while let Some(task) = receiver.recv().await {
             let permit = self.semaphore.clone().acquire_owned().await.unwrap();
-            self.queue_size.fetch_sub(1, Ordering::SeqCst);
+            self.pending_count.fetch_sub(1, Ordering::SeqCst);
 
             // Update status to processing
             self.update_status(&task.id, TaskStatus::Processing).await;

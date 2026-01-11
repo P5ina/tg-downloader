@@ -104,9 +104,9 @@ async fn send_quality_message(
     }
 
     // Show queue status if there are pending tasks
-    let queue_size = task_queue.queue_size();
-    let queue_info = if queue_size > 0 {
-        format!("\n\n📊 В очереди сейчас {} задач", queue_size)
+    let pending = task_queue.pending_count();
+    let queue_info = if pending > 0 {
+        format!("\n\n📊 В очереди сейчас {} задач", pending)
     } else {
         String::new()
     };

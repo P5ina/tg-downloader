@@ -31,8 +31,10 @@ pub enum State {
 enum Command {
     /// Show start menu
     Start,
-    /// Cancel the download.
+    /// Cancel the download
     Cancel,
+    /// Show queue status
+    Queue,
 }
 
 /// Check if callback data is a format selection from queue (fmt:...)
@@ -56,7 +58,8 @@ pub fn schema() -> UpdateHandler<BotError> {
                     // Filter for commands
                     teloxide::filter_command::<Command, _>()
                         .branch(case![State::Start].branch(case![Command::Start].endpoint(start)))
-                        .branch(case![Command::Cancel].endpoint(cancel)),
+                        .branch(case![Command::Cancel].endpoint(cancel))
+                        .branch(case![Command::Queue].endpoint(queue)),
                 )
                 // Filter for the youtube links - now accepts links in any state
                 .branch(
