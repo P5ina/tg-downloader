@@ -70,11 +70,6 @@ pub async fn format_received(
                         "✅ Готово! Ваше видео отправлено!",
                     )
                     .await?;
-                    bot.send_message(
-                        chat_id,
-                        "Можете теперь отправить еще одно видео.",
-                    )
-                    .await?;
                 }
                 Err(RequestError::Api(ApiError::RequestEntityTooLarge)) => {
                     bot.edit_message_text(
@@ -290,11 +285,6 @@ pub async fn format_received(
                     chat_id,
                     message_id,
                     "✅ Готово! Ваше видео успешно конвертировано!",
-                )
-                .await?;
-                bot.send_message(
-                    chat_id,
-                    "Можете теперь отправить еще одно видео, чтобы сконвертировать и его.",
                 )
                 .await?;
             }

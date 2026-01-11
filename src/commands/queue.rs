@@ -4,18 +4,6 @@ use teloxide::prelude::*;
 
 use crate::{errors::HandlerResult, queue::{TaskQueue, TaskStatus}};
 
-/// Generate a progress bar string
-fn progress_bar(progress: Option<u8>, width: usize) -> String {
-    match progress {
-        Some(p) => {
-            let filled = (p as usize * width) / 100;
-            let empty = width - filled;
-            format!("{}{} {}%", "▓".repeat(filled), "░".repeat(empty), p)
-        }
-        None => format!("{} ожидает", "░".repeat(width))
-    }
-}
-
 pub async fn queue(bot: Bot, msg: Message, task_queue: Arc<TaskQueue>) -> HandlerResult {
     let pending = task_queue.pending_count();
     let user_tasks = task_queue.get_user_tasks(msg.chat.id).await;
@@ -28,24 +16,25 @@ pub async fn queue(bot: Bot, msg: Message, task_queue: Arc<TaskQueue>) -> Handle
 
     let mut response = String::new();
 
-    // Global queue status - compact header
-    response.push_str(&format!("📊 Очередь ({})\n\n", pending));
+    // Global queue status
+    if pending > 0 {
+        response.push_str(&format!("📊 В очереди: {} задач\n\n", pending));
+    } else {
+        response.push_str("📊 Очередь пуста\n\n");
+    }
 
-    // User's active tasks with progress bars
+    // User's active tasks
     if active_tasks.is_empty() {
         response.push_str("У вас нет активных задач.");
     } else {
+        response.push_str("Ваши задачи:\n");
         for task in active_tasks {
-            let emoji = task.description.emoji();
-            let label = task.description.to_string();
-
-            let progress_display = match &task.status {
-                TaskStatus::Processing => progress_bar(task.progress.or(Some(0)), 10),
-                TaskStatus::Queued { position } => format!("{} #{}", "░".repeat(10), position),
+            let status = match &task.status {
+                TaskStatus::Queued { position } => format!("⏳ #{}", position),
+                TaskStatus::Processing => "🔄 обработка".to_string(),
                 _ => continue,
             };
-
-            response.push_str(&format!("{} {} {}\n", emoji, label, progress_display));
+            response.push_str(&format!("• {} — {}\n", task.task_type, status));
         }
     }
 

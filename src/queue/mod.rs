@@ -102,43 +102,12 @@ pub enum TaskStatus {
     Failed(String),
 }
 
-/// Human-readable task description
-#[derive(Debug, Clone)]
-pub enum TaskDescription {
-    Download { quality: u32 },
-    Convert { format: MediaFormatType },
-}
-
-impl std::fmt::Display for TaskDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TaskDescription::Download { quality } => write!(f, "{}p", quality),
-            TaskDescription::Convert { format } => write!(f, "{}", format),
-        }
-    }
-}
-
-impl TaskDescription {
-    pub fn emoji(&self) -> &'static str {
-        match self {
-            TaskDescription::Download { .. } => "📥",
-            TaskDescription::Convert { format } => match format {
-                MediaFormatType::Video => "🎬",
-                MediaFormatType::VideoNote => "⚪",
-                MediaFormatType::Audio => "🎵",
-                MediaFormatType::Voice => "🎤",
-            },
-        }
-    }
-}
-
 /// Information about a queued task for the user
 #[derive(Debug, Clone)]
 pub struct QueuedTaskInfo {
     pub task_id: TaskId,
     pub status: TaskStatus,
-    pub description: TaskDescription,
-    pub progress: Option<u8>, // 0-100
+    pub task_type: String,
 }
 
 /// Global task queue manager
@@ -248,17 +217,16 @@ impl TaskQueue {
         // Track task status
         {
             let mut statuses = self.task_statuses.lock().await;
-            let description = match &task.task_type {
-                TaskType::Download { quality, .. } => TaskDescription::Download { quality: *quality },
-                TaskType::Convert { format, .. } => TaskDescription::Convert { format: format.clone() },
+            let task_type = match &task.task_type {
+                TaskType::Download { quality, .. } => format!("📥 {}p", quality),
+                TaskType::Convert { format, .. } => format!("{} {}", format.emoji(), format),
             };
             statuses.insert(
                 task.id.clone(),
                 QueuedTaskInfo {
                     task_id: task.id.clone(),
                     status: TaskStatus::Queued { position },
-                    description,
-                    progress: None,
+                    task_type,
                 },
             );
         }
@@ -299,14 +267,6 @@ impl TaskQueue {
         }
     }
 
-    /// Update task progress (0-100)
-    pub async fn update_progress(&self, task_id: &TaskId, progress: u8) {
-        let mut statuses = self.task_statuses.lock().await;
-        if let Some(info) = statuses.get_mut(task_id) {
-            info.progress = Some(progress.min(100));
-        }
-    }
-
     /// Main worker loop
     async fn run_worker(&self, mut receiver: mpsc::UnboundedReceiver<Task>, bot: Bot) {
         while let Some(task) = receiver.recv().await {
@@ -323,10 +283,9 @@ impl TaskQueue {
             let pending_conversions = self.pending_conversions.clone();
 
             // Spawn task handler
-            let task_statuses_for_progress = task_statuses.clone();
             tokio::spawn(async move {
                 log::info!("Processing task {}: {:?}", task_id, task.task_type);
-                let result = process_task(&bot_clone, &task, &pending_conversions, &task_statuses_for_progress).await;
+                let result = process_task(&bot_clone, &task, &pending_conversions).await;
 
                 match &result {
                     Ok(_) => log::info!("Task {} completed successfully", task_id),
@@ -370,14 +329,13 @@ async fn process_task(
     bot: &Bot,
     task: &Task,
     pending_conversions: &Arc<Mutex<HashMap<String, PendingConversion>>>,
-    task_statuses: &Arc<Mutex<HashMap<TaskId, QueuedTaskInfo>>>,
 ) -> Result<(), String> {
     match &task.task_type {
         TaskType::Download { url, quality } => {
-            process_download_task(bot, task, url, *quality, pending_conversions, task_statuses).await
+            process_download_task(bot, task, url, *quality, pending_conversions).await
         }
         TaskType::Convert { filename, format } => {
-            process_convert_task(bot, task, filename, format.clone(), task_statuses).await
+            process_convert_task(bot, task, filename, format.clone()).await
         }
     }
 }
@@ -389,9 +347,8 @@ async fn process_download_task(
     url: &str,
     quality: u32,
     pending_conversions: &Arc<Mutex<HashMap<String, PendingConversion>>>,
-    task_statuses: &Arc<Mutex<HashMap<TaskId, QueuedTaskInfo>>>,
 ) -> Result<(), String> {
-    use crate::video::youtube::download_video_with_progress;
+    use crate::video::youtube::download_video;
     use strum::IntoEnumIterator;
     use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
@@ -406,27 +363,7 @@ async fn process_download_task(
         )
         .await;
 
-    // Create progress channel
-    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<u8>();
-
-    // Spawn progress updater
-    let task_id = task.id.clone();
-    let task_statuses_clone = task_statuses.clone();
-    let progress_task = tokio::spawn(async move {
-        while let Some(progress) = progress_rx.recv().await {
-            let mut statuses = task_statuses_clone.lock().await;
-            if let Some(info) = statuses.get_mut(&task_id) {
-                info.progress = Some(progress);
-            }
-        }
-    });
-
-    let result = download_video_with_progress(url, &task.unique_file_id, Some(quality), Some(progress_tx)).await;
-
-    // Stop progress task
-    progress_task.abort();
-
-    match result {
+    match download_video(url, &task.unique_file_id, Some(quality)).await {
         Ok(filename) => {
             log::info!("Downloaded file: {}", filename);
 
@@ -489,7 +426,6 @@ async fn process_convert_task(
     task: &Task,
     filename: &str,
     format: MediaFormatType,
-    _task_statuses: &Arc<Mutex<HashMap<TaskId, QueuedTaskInfo>>>,
 ) -> Result<(), String> {
     use crate::video::convert::{convert_audio, convert_video_note};
     use crate::video::{VideoInfo, compress_video_with_progress};
@@ -527,9 +463,6 @@ async fn process_convert_task(
                         task.message_id,
                         "✅ Готово! Ваше видео отправлено!",
                     )
-                    .await;
-                let _ = bot
-                    .send_message(task.chat_id, "Можете отправить еще одну ссылку.")
                     .await;
             }
             Err(RequestError::Api(ApiError::RequestEntityTooLarge)) => {
@@ -683,9 +616,6 @@ async fn process_convert_task(
                             task.message_id,
                             "✅ Готово! Файл отправлен!",
                         )
-                        .await;
-                    let _ = bot
-                        .send_message(task.chat_id, "Можете отправить еще одну ссылку.")
                         .await;
                 }
                 Err(RequestError::Api(ApiError::RequestEntityTooLarge)) => {

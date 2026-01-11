@@ -81,6 +81,17 @@ pub enum MediaFormatType {
     Voice,
 }
 
+impl MediaFormatType {
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            MediaFormatType::Video => "🎬",
+            MediaFormatType::VideoNote => "⚪",
+            MediaFormatType::Audio => "🎵",
+            MediaFormatType::Voice => "🎤",
+        }
+    }
+}
+
 pub async fn loading_screen_with_progress(
     bot: Bot,
     chat_id: ChatId,
