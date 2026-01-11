@@ -103,11 +103,7 @@ fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
     let mut cmd = process::Command::new("yt-dlp");
     cmd.arg("--no-playlist")
         .args(["--socket-timeout", "5", "--retries", "3"])
-        .args(["--merge-output-format", "mp4"])
-        .args([
-            "--postprocessor-args",
-            "ffmpeg:-c:v libx264 -preset ultrafast -crf 23 -c:a aac -movflags +faststart",
-        ]);
+        .args(["--remux-video", "mp4"]); // Remux without re-encoding to preserve quality
 
     // Apply quality filter if specified
     if let Some(height) = max_height {
