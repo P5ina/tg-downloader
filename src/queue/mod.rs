@@ -102,12 +102,43 @@ pub enum TaskStatus {
     Failed(String),
 }
 
+/// Human-readable task description
+#[derive(Debug, Clone)]
+pub enum TaskDescription {
+    Download { quality: u32 },
+    Convert { format: MediaFormatType },
+}
+
+impl std::fmt::Display for TaskDescription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskDescription::Download { quality } => write!(f, "{}p", quality),
+            TaskDescription::Convert { format } => write!(f, "{}", format),
+        }
+    }
+}
+
+impl TaskDescription {
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            TaskDescription::Download { .. } => "📥",
+            TaskDescription::Convert { format } => match format {
+                MediaFormatType::Video => "🎬",
+                MediaFormatType::VideoNote => "⚪",
+                MediaFormatType::Audio => "🎵",
+                MediaFormatType::Voice => "🎤",
+            },
+        }
+    }
+}
+
 /// Information about a queued task for the user
 #[derive(Debug, Clone)]
 pub struct QueuedTaskInfo {
     pub task_id: TaskId,
     pub status: TaskStatus,
-    pub task_type: String,
+    pub description: TaskDescription,
+    pub progress: Option<u8>, // 0-100
 }
 
 /// Global task queue manager
@@ -217,16 +248,17 @@ impl TaskQueue {
         // Track task status
         {
             let mut statuses = self.task_statuses.lock().await;
-            let task_type_str = match &task.task_type {
-                TaskType::Download { .. } => "download".to_string(),
-                TaskType::Convert { format, .. } => format!("convert:{}", format),
+            let description = match &task.task_type {
+                TaskType::Download { quality, .. } => TaskDescription::Download { quality: *quality },
+                TaskType::Convert { format, .. } => TaskDescription::Convert { format: format.clone() },
             };
             statuses.insert(
                 task.id.clone(),
                 QueuedTaskInfo {
                     task_id: task.id.clone(),
                     status: TaskStatus::Queued { position },
-                    task_type: task_type_str,
+                    description,
+                    progress: None,
                 },
             );
         }
@@ -264,6 +296,14 @@ impl TaskQueue {
         let mut statuses = self.task_statuses.lock().await;
         if let Some(info) = statuses.get_mut(task_id) {
             info.status = status;
+        }
+    }
+
+    /// Update task progress (0-100)
+    pub async fn update_progress(&self, task_id: &TaskId, progress: u8) {
+        let mut statuses = self.task_statuses.lock().await;
+        if let Some(info) = statuses.get_mut(task_id) {
+            info.progress = Some(progress.min(100));
         }
     }
 

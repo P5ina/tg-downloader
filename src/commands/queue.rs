@@ -4,6 +4,18 @@ use teloxide::prelude::*;
 
 use crate::{errors::HandlerResult, queue::{TaskQueue, TaskStatus}};
 
+/// Generate a progress bar string
+fn progress_bar(progress: Option<u8>, width: usize) -> String {
+    match progress {
+        Some(p) => {
+            let filled = (p as usize * width) / 100;
+            let empty = width - filled;
+            format!("{}{} {}%", "▓".repeat(filled), "░".repeat(empty), p)
+        }
+        None => format!("{} ожидает", "░".repeat(width))
+    }
+}
+
 pub async fn queue(bot: Bot, msg: Message, task_queue: Arc<TaskQueue>) -> HandlerResult {
     let pending = task_queue.pending_count();
     let user_tasks = task_queue.get_user_tasks(msg.chat.id).await;
@@ -16,34 +28,24 @@ pub async fn queue(bot: Bot, msg: Message, task_queue: Arc<TaskQueue>) -> Handle
 
     let mut response = String::new();
 
-    // Global queue status
-    if pending > 0 {
-        response.push_str(&format!("📊 В очереди: {} задач\n\n", pending));
-    } else {
-        response.push_str("📊 Очередь пуста\n\n");
-    }
+    // Global queue status - compact header
+    response.push_str(&format!("📊 Очередь ({})\n\n", pending));
 
-    // User's active tasks
+    // User's active tasks with progress bars
     if active_tasks.is_empty() {
         response.push_str("У вас нет активных задач.");
     } else {
-        response.push_str("Ваши задачи:\n");
         for task in active_tasks {
-            let status_emoji = match &task.status {
-                TaskStatus::Queued { .. } => "⏳ Ожидает".to_string(),
-                TaskStatus::Processing => "🔄 Обрабатывается".to_string(),
+            let emoji = task.description.emoji();
+            let label = task.description.to_string();
+
+            let progress_display = match &task.status {
+                TaskStatus::Processing => progress_bar(task.progress.or(Some(0)), 10),
+                TaskStatus::Queued { position } => format!("{} #{}", "░".repeat(10), position),
                 _ => continue,
             };
 
-            let task_type = if task.task_type.starts_with("download") {
-                "Скачивание"
-            } else if task.task_type.starts_with("convert") {
-                "Конвертация"
-            } else {
-                &task.task_type
-            };
-
-            response.push_str(&format!("• {} - {}\n", task_type, status_emoji));
+            response.push_str(&format!("{} {} {}\n", emoji, label, progress_display));
         }
     }
 
