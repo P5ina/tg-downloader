@@ -36,7 +36,7 @@ pub async fn premium(
                 days_left,
                 expires_at.format("%d.%m.%Y %H:%M UTC")
             );
-            (text, true) // Can extend subscription
+            (text, false) // Cannot buy while active
         }
         SubscriptionInfo::Expired { expired_at } => {
             let text = format!(
@@ -82,6 +82,7 @@ pub async fn premium(
 pub async fn handle_buy_premium_callback(
     bot: Bot,
     query: CallbackQuery,
+    subscription_manager: Arc<SubscriptionManager>,
 ) -> HandlerResult {
     bot.answer_callback_query(query.id.clone()).await?;
 
@@ -90,7 +91,19 @@ pub async fn handle_buy_premium_callback(
         teloxide::types::MaybeInaccessibleMessage::Inaccessible(msg) => msg.chat.id,
     });
 
-    let user_id = query.from.id.0;
+    let user_id = query.from.id.0 as i64;
+
+    // Check if user already has active subscription
+    if subscription_manager.is_subscribed(user_id).await {
+        if let Some(chat_id) = chat_id {
+            bot.send_message(
+                chat_id,
+                "У вас уже есть активная подписка. Дождитесь её окончания для продления.",
+            )
+            .await?;
+        }
+        return Ok(());
+    }
 
     if let Some(chat_id) = chat_id {
         // Create invoice payload with user_id
