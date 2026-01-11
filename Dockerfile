@@ -41,7 +41,7 @@ VOLUME ["/bot-api-data"]
 
 # Рабочая директория для данных (БД, видео)
 WORKDIR /data
-RUN mkdir -p /data
+RUN mkdir -p /data/videos /data/converted
 
 # По умолчанию запускаем приложение
 CMD ["app"]
