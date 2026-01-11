@@ -111,9 +111,10 @@ fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
 
     // Apply quality filter if specified
     if let Some(height) = max_height {
+        // Don't filter by ext - yt-dlp will merge to mp4 anyway
         let format = format!(
-            "bestvideo[height<={}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={}]+bestaudio/best[height<={}]/best",
-            height, height, height
+            "bestvideo[height<={}]+bestaudio/best[height<={}]/best",
+            height, height
         );
         cmd.args(["-f", &format]);
     }
