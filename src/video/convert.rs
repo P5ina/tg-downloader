@@ -31,31 +31,6 @@ pub async fn convert_video_note<P: AsRef<Path>>(file: P) -> BotResult<String> {
     .await
 }
 
-pub async fn convert_video_with_progress<P: AsRef<Path>>(
-    file: P,
-    progress_sender: Option<mpsc::UnboundedSender<ProgressInfo>>,
-) -> BotResult<String> {
-    // First try normal conversion
-    let converted_file =
-        convert_with_progress(file.as_ref(), "mp4", &["-fs", "240M"], progress_sender).await?;
-
-    // Check file size
-    let file_size = fs::metadata(&converted_file).await?.len();
-
-    if file_size <= MAX_FILE_SIZE {
-        return Ok(converted_file);
-    }
-
-    // File is too big, remove it and try compression
-    fs::remove_file(&converted_file).await?;
-
-    // Return error to signal that compression is needed
-    Err(BotError::file_too_large(format!(
-        "File size {} bytes exceeds {} bytes limit",
-        file_size, MAX_FILE_SIZE
-    )))
-}
-
 pub async fn compress_video_with_progress<P: AsRef<Path>>(
     file: P,
     progress_sender: Option<mpsc::UnboundedSender<ProgressInfo>>,
