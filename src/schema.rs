@@ -10,7 +10,10 @@ use teloxide::{
 use crate::{
     commands::*,
     errors::BotError,
-    handlers::{format_callback_received, format_received, link_received, quality_received, video_received},
+    handlers::{
+        format_callback_received, format_received, handle_pre_checkout_query,
+        handle_successful_payment, link_received, quality_received, video_received,
+    },
     utils::is_youtube_video_link,
 };
 
@@ -21,9 +24,7 @@ pub enum State {
     #[default]
     Start,
     /// Legacy state for direct video upload format selection
-    ReceiveFormat {
-        filename: String,
-    },
+    ReceiveFormat { filename: String },
 }
 
 #[derive(BotCommands, Clone)]
@@ -35,6 +36,8 @@ enum Command {
     Cancel,
     /// Show queue status
     Queue,
+    /// Show premium subscription status
+    Premium,
 }
 
 /// Check if callback data is a format selection from queue (fmt:...)
@@ -45,6 +48,11 @@ fn is_format_callback(data: &str) -> bool {
 /// Check if callback data is a quality selection (q:...)
 fn is_quality_callback(data: &str) -> bool {
     data.starts_with("q:")
+}
+
+/// Check if callback data is a buy premium action
+fn is_buy_premium_callback(data: &str) -> bool {
+    data == "buy_premium"
 }
 
 pub fn schema() -> UpdateHandler<BotError> {
@@ -59,7 +67,8 @@ pub fn schema() -> UpdateHandler<BotError> {
                     teloxide::filter_command::<Command, _>()
                         .branch(case![State::Start].branch(case![Command::Start].endpoint(start)))
                         .branch(case![Command::Cancel].endpoint(cancel))
-                        .branch(case![Command::Queue].endpoint(queue)),
+                        .branch(case![Command::Queue].endpoint(queue))
+                        .branch(case![Command::Premium].endpoint(premium)),
                 )
                 // Filter for the youtube links - now accepts links in any state
                 .branch(
@@ -76,21 +85,46 @@ pub fn schema() -> UpdateHandler<BotError> {
                                 .unwrap_or(true)
                         })
                         .endpoint(video_received),
+                )
+                // Handle successful payment
+                .branch(
+                    dptree::filter(|msg: Message| msg.successful_payment().is_some())
+                        .endpoint(handle_successful_payment),
                 ),
         )
         .branch(
+            // Handle pre-checkout queries
+            Update::filter_pre_checkout_query().endpoint(handle_pre_checkout_query),
+        )
+        .branch(
             Update::filter_callback_query()
+                // Handle buy premium callback
+                .branch(
+                    dptree::filter(|q: CallbackQuery| {
+                        q.data
+                            .as_ref()
+                            .map(|d| is_buy_premium_callback(d))
+                            .unwrap_or(false)
+                    })
+                    .endpoint(handle_buy_premium_callback),
+                )
                 // Handle quality selection from queue (q:task_id:url:height)
                 .branch(
                     dptree::filter(|q: CallbackQuery| {
-                        q.data.as_ref().map(|d| is_quality_callback(d)).unwrap_or(false)
+                        q.data
+                            .as_ref()
+                            .map(|d| is_quality_callback(d))
+                            .unwrap_or(false)
                     })
                     .endpoint(quality_received),
                 )
                 // Handle format selection from queue (fmt:format_index:task_id:filename)
                 .branch(
                     dptree::filter(|q: CallbackQuery| {
-                        q.data.as_ref().map(|d| is_format_callback(d)).unwrap_or(false)
+                        q.data
+                            .as_ref()
+                            .map(|d| is_format_callback(d))
+                            .unwrap_or(false)
                     })
                     .endpoint(format_callback_received),
                 )
