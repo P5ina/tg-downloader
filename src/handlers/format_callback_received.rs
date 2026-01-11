@@ -43,7 +43,7 @@ pub async fn format_callback_received(
         MaybeInaccessibleMessage::Regular(m) => m.id,
     };
 
-    bot.answer_callback_query(&query.id).await?;
+    bot.answer_callback_query(query.id.clone()).await?;
 
     // Parse callback data: fmt:format_index:short_id
     let stripped = data.strip_prefix("fmt:").ok_or_else(|| {

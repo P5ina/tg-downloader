@@ -83,7 +83,7 @@ pub async fn handle_buy_premium_callback(
     bot: Bot,
     query: CallbackQuery,
 ) -> HandlerResult {
-    bot.answer_callback_query(&query.id).await?;
+    bot.answer_callback_query(query.id.clone()).await?;
 
     let chat_id = query.message.as_ref().map(|m| match m {
         teloxide::types::MaybeInaccessibleMessage::Regular(msg) => msg.chat.id,

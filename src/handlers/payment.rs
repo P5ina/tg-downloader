@@ -11,9 +11,9 @@ use crate::{
 pub async fn handle_pre_checkout_query(bot: Bot, query: PreCheckoutQuery) -> HandlerResult {
     // Verify the payload starts with our prefix
     if query.invoice_payload.starts_with("premium_sub_") {
-        bot.answer_pre_checkout_query(&query.id, true).await?;
+        bot.answer_pre_checkout_query(query.id.clone(), true).await?;
     } else {
-        bot.answer_pre_checkout_query(&query.id, false)
+        bot.answer_pre_checkout_query(query.id.clone(), false)
             .error_message("Unknown payment type")
             .await?;
     }

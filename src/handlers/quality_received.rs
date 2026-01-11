@@ -37,7 +37,7 @@ pub async fn quality_received(
         MaybeInaccessibleMessage::Regular(m) => m.id,
     };
 
-    bot.answer_callback_query(&query.id).await?;
+    bot.answer_callback_query(query.id.clone()).await?;
 
     // Parse callback data: q:short_id:height
     let stripped = data.strip_prefix("q:").ok_or_else(|| {

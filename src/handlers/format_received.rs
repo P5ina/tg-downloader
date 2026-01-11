@@ -39,7 +39,7 @@ pub async fn format_received(
             MaybeInaccessibleMessage::Inaccessible(ref m) => m.chat.id,
             MaybeInaccessibleMessage::Regular(ref m) => m.chat.id,
         };
-        bot.answer_callback_query(&query.id).await?;
+        bot.answer_callback_query(query.id.clone()).await?;
 
         let media_format = MediaFormatType::from_str(s)?;
 
