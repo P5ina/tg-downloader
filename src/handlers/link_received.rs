@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use teloxide::{
     prelude::*,
-    types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode},
 };
 
 use crate::{
@@ -23,7 +23,9 @@ pub async fn link_received(
         BotError::general("Text should be here. It's invalid state")
     })?;
 
-    bot.send_chat_action(msg.chat.id, ChatAction::Typing)
+    // Send immediate feedback
+    let status_msg = bot
+        .send_message(msg.chat.id, "🔍 Получаю информацию о видео...")
         .await?;
 
     // Check video duration first
@@ -32,10 +34,11 @@ pub async fn link_received(
             if is_video_too_long(duration) {
                 let formatted_duration = format_duration(duration);
                 let max_duration = format_duration(MAX_VIDEO_DURATION_SECONDS);
-                bot.send_message(
+                bot.edit_message_text(
                     msg.chat.id,
+                    status_msg.id,
                     format!(
-                        "<b>❌ Видео слишком длинное</b> ({}).\nМаксимальная длительность: {}",
+                        "❌ <b>Видео слишком длинное</b> ({}).\nМаксимальная длительность: {}",
                         formatted_duration, max_duration
                     ),
                 )
@@ -56,12 +59,13 @@ pub async fn link_received(
     match get_available_qualities(text).await {
         Ok(qualities) => {
             log::info!("Found {} quality options", qualities.len());
-            send_quality_message(&bot, &msg, text, &qualities, &task_queue).await?;
+            send_quality_message(&bot, &msg, &status_msg, text, &qualities, &task_queue).await?;
         }
         Err(e) => {
             log::error!("Failed to get video qualities: {e}");
-            bot.send_message(
+            bot.edit_message_text(
                 msg.chat.id,
+                status_msg.id,
                 "❌ Не могу получить информацию о видео, попробуй другую ссылку.",
             )
             .await?;
@@ -74,18 +78,14 @@ pub async fn link_received(
 async fn send_quality_message(
     bot: &Bot,
     msg: &Message,
+    status_msg: &Message,
     url: &str,
     qualities: &[crate::video::VideoQuality],
     task_queue: &Arc<TaskQueue>,
 ) -> HandlerResult {
-    // Send message first to get message_id
-    let sent_msg = bot
-        .send_message(msg.chat.id, "🎬 Загрузка...")
-        .await?;
-
     // Store URL in pending downloads and get short ID
     let short_id = task_queue
-        .add_pending_download(url.to_string(), msg.chat.id, sent_msg.id)
+        .add_pending_download(url.to_string(), msg.chat.id, status_msg.id)
         .await;
 
     // Create quality buttons with short callback: q:short_id:height
@@ -113,7 +113,7 @@ async fn send_quality_message(
 
     bot.edit_message_text(
         msg.chat.id,
-        sent_msg.id,
+        status_msg.id,
         format!("🎬 Выбери качество видео:{}", queue_info),
     )
     .reply_markup(keyboard)
