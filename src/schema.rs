@@ -10,7 +10,7 @@ use teloxide::{
 use crate::{
     commands::*,
     errors::BotError,
-    handlers::{duplicated_link_received, format_received, link_received, video_received},
+    handlers::{duplicated_link_received, format_received, link_received, quality_received, video_received},
     utils::is_youtube_video_link,
 };
 
@@ -20,6 +20,9 @@ pub type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub enum State {
     #[default]
     Start,
+    ReceiveQuality {
+        url: String,
+    },
     ReceiveFormat {
         filename: String,
     },
@@ -53,6 +56,10 @@ pub fn schema() -> UpdateHandler<BotError> {
                         .filter(|text: String| is_youtube_video_link(&text))
                         .branch(case![State::Start].endpoint(link_received))
                         .branch(
+                            case![State::ReceiveQuality { url }]
+                                .endpoint(duplicated_link_received),
+                        )
+                        .branch(
                             case![State::ReceiveFormat { filename }]
                                 .endpoint(duplicated_link_received),
                         ),
@@ -61,6 +68,7 @@ pub fn schema() -> UpdateHandler<BotError> {
         )
         .branch(
             Update::filter_callback_query()
+                .branch(case![State::ReceiveQuality { url }].endpoint(quality_received))
                 .branch(case![State::ReceiveFormat { filename }].endpoint(format_received)),
         )
 }

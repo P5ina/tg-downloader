@@ -1,28 +1,21 @@
-use std::path::PathBuf;
-
-use log::info;
-use strum::IntoEnumIterator;
 use teloxide::{
     prelude::*,
     types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode},
 };
 
 use crate::{
-    errors::HandlerResult,
+    errors::{BotError, HandlerResult},
     schema::{MyDialogue, State},
-    utils::MediaFormatType,
     video::youtube::{
-        MAX_VIDEO_DURATION_SECONDS, download_video, format_duration, get_video_duration,
+        MAX_VIDEO_DURATION_SECONDS, format_duration, get_available_qualities, get_video_duration,
         is_video_too_long,
     },
 };
 
 pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     let text = msg.text().ok_or_else(|| {
-        crate::errors::BotError::general("Text should be here. It's invalid state")
+        BotError::general("Text should be here. It's invalid state")
     })?;
-
-    let unique_id = format!("chat{}_msg{}", msg.chat.id, msg.id);
 
     bot.send_chat_action(msg.chat.id, ChatAction::Typing)
         .await?;
@@ -52,55 +45,57 @@ pub async fn link_received(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
         }
     }
 
-    bot.send_chat_action(msg.chat.id, ChatAction::UploadVideo)
-        .await?;
-
-    log::info!("Downloading file.");
-    match download_video(text, &unique_id).await {
-        Ok(file) => {
-            info!("Downloaded file with name {}", file);
-            send_format_message(bot, dialogue, msg, &file).await?;
+    // Get available qualities
+    log::info!("Getting available qualities for URL: {}", text);
+    match get_available_qualities(text).await {
+        Ok(qualities) => {
+            log::info!("Found {} quality options", qualities.len());
+            send_quality_message(&bot, &dialogue, &msg, text, &qualities).await?;
         }
         Err(e) => {
-            log::error!("yt-dlp error: {e}");
+            log::error!("Failed to get video qualities: {e}");
             bot.send_message(
                 msg.chat.id,
-                "❌ Не могу скачать это видео, попробуй другое.",
+                "❌ Не могу получить информацию о видео, попробуй другую ссылку.",
             )
             .await?;
         }
     }
+
     Ok(())
 }
 
-pub async fn send_format_message(
-    bot: Bot,
-    dialogue: MyDialogue,
-    msg: Message,
-    filename: impl Into<PathBuf>,
+async fn send_quality_message(
+    bot: &Bot,
+    dialogue: &MyDialogue,
+    msg: &Message,
+    url: &str,
+    qualities: &[crate::video::VideoQuality],
 ) -> HandlerResult {
-    let formats: Vec<InlineKeyboardButton> = MediaFormatType::iter()
-        .map(|f| format!("{}", f))
-        .map(|f| InlineKeyboardButton::callback(&f, &f))
+    // Create quality buttons (2 per row)
+    let buttons: Vec<InlineKeyboardButton> = qualities
+        .iter()
+        .map(|q| InlineKeyboardButton::callback(&q.label, q.callback_data()))
         .collect();
+
+    let mut keyboard = InlineKeyboardMarkup::default();
+    for chunk in buttons.chunks(2) {
+        keyboard = keyboard.append_row(chunk.to_vec());
+    }
 
     bot.send_message(
         msg.chat.id,
-        "Видео загружено. Теперь выбери формат в котором ты хочешь получить это видео",
+        "🎬 Выбери качество видео:",
     )
-    .reply_markup(
-        InlineKeyboardMarkup::default()
-            .append_row([formats[0].clone(), formats[1].clone()])
-            .append_row([formats[2].clone(), formats[3].clone()]),
-    )
+    .reply_markup(keyboard)
     .await?;
+
     dialogue
-        .update(State::ReceiveFormat {
-            filename: filename.into().to_str().unwrap().to_owned(),
+        .update(State::ReceiveQuality {
+            url: url.to_owned(),
         })
         .await
-        .map_err(|e| {
-            crate::errors::BotError::general(format!("Failed to update dialogue: {}", e))
-        })?;
+        .map_err(|e| BotError::general(format!("Failed to update dialogue: {}", e)))?;
+
     Ok(())
 }

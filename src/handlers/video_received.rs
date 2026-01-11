@@ -1,13 +1,13 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use teloxide::{prelude::*, types::Video};
+use strum::IntoEnumIterator;
+use teloxide::{prelude::*, types::{InlineKeyboardButton, InlineKeyboardMarkup, Video}};
 use tokio::fs;
 
 use crate::{
     errors::{BotError, HandlerResult},
-    handlers::link_received::send_format_message,
-    schema::MyDialogue,
-    utils::{get_unique_file_id, replace_path_keep_extension_inplace},
+    schema::{MyDialogue, State},
+    utils::{get_unique_file_id, replace_path_keep_extension_inplace, MediaFormatType},
 };
 
 pub async fn video_received(
@@ -42,5 +42,35 @@ pub async fn video_received(
     log::debug!("Video downloaded");
 
     send_format_message(bot, dialogue, msg, &output_path).await?;
+    Ok(())
+}
+
+async fn send_format_message(
+    bot: Bot,
+    dialogue: MyDialogue,
+    msg: Message,
+    filename: impl Into<PathBuf>,
+) -> HandlerResult {
+    let formats: Vec<InlineKeyboardButton> = MediaFormatType::iter()
+        .map(|f| format!("{}", f))
+        .map(|f| InlineKeyboardButton::callback(&f, &f))
+        .collect();
+
+    bot.send_message(
+        msg.chat.id,
+        "Видео загружено. Теперь выбери формат в котором ты хочешь получить это видео",
+    )
+    .reply_markup(
+        InlineKeyboardMarkup::default()
+            .append_row([formats[0].clone(), formats[1].clone()])
+            .append_row([formats[2].clone(), formats[3].clone()]),
+    )
+    .await?;
+    dialogue
+        .update(State::ReceiveFormat {
+            filename: filename.into().to_str().unwrap().to_owned(),
+        })
+        .await
+        .map_err(|e| BotError::general(format!("Failed to update dialogue: {}", e)))?;
     Ok(())
 }

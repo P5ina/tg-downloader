@@ -1,21 +1,124 @@
+use log::info;
+use serde::Deserialize;
 use tokio::{fs, process};
 
 use crate::errors::{BotError, BotResult};
 
-// const VIDEO_FORMAT: &str = "bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/mp4";
 pub const MAX_VIDEO_DURATION_SECONDS: u32 = 3600; // 1 hour
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VideoQuality {
+    pub height: u32,
+    pub label: String,
+}
+
+impl VideoQuality {
+    pub fn new(height: u32) -> Self {
+        let label = format!("{}p", height);
+        Self { height, label }
+    }
+
+    pub fn callback_data(&self) -> String {
+        format!("quality:{}", self.height)
+    }
+
+    pub fn from_callback_data(data: &str) -> Option<u32> {
+        data.strip_prefix("quality:").and_then(|h| h.parse().ok())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct YtDlpFormat {
+    height: Option<u32>,
+    vcodec: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YtDlpInfo {
+    formats: Vec<YtDlpFormat>,
+}
+
+/// Get available video qualities for a YouTube URL
+pub async fn get_available_qualities(url: &str) -> BotResult<Vec<VideoQuality>> {
+    let mut cmd = process::Command::new("yt-dlp");
+    cmd.arg("--no-playlist")
+        .args(["--socket-timeout", "5", "--retries", "3"])
+        .args(["-J"]) // JSON output
+        .arg(url);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(BotError::youtube_error(stderr_str));
+    }
+
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    let info: YtDlpInfo = serde_json::from_str(&json_str)
+        .map_err(|e| BotError::ParseError(format!("Failed to parse yt-dlp output: {}", e)))?;
+
+    // Collect unique heights from video formats
+    let mut heights: Vec<u32> = info
+        .formats
+        .iter()
+        .filter(|f| {
+            f.vcodec.as_ref().map_or(false, |v| v != "none")
+                && f.height.map_or(false, |h| h > 0)
+        })
+        .filter_map(|f| f.height)
+        .collect();
+
+    heights.sort_unstable();
+    heights.dedup();
+
+    // Standard qualities to offer (filter by what's actually available)
+    let standard_qualities = [360, 480, 720, 1080, 1440, 2160];
+    let available: Vec<VideoQuality> = standard_qualities
+        .iter()
+        .filter(|&&h| heights.iter().any(|&available_h| available_h >= h))
+        .map(|&h| VideoQuality::new(h))
+        .collect();
+
+    if available.is_empty() {
+        // If no standard qualities match, return the best available
+        if let Some(&max_height) = heights.last() {
+            return Ok(vec![VideoQuality::new(max_height)]);
+        }
+        return Err(BotError::youtube_error(
+            "No video formats available".to_string(),
+        ));
+    }
+
+    Ok(available)
+}
 
 fn get_output_format(unique_id: &str) -> String {
     format!("videos/%(id)s_{unique_id}.%(ext)s")
 }
 
-fn build_base_command(url: &str) -> process::Command {
+fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
     let mut cmd = process::Command::new("yt-dlp");
     cmd.arg("--no-playlist")
         .args(["--socket-timeout", "5", "--retries", "3"])
-        .args(["--remux-video", "mp4"])
-        // .args(["-f", VIDEO_FORMAT])
-        .arg(url);
+        .args(["--merge-output-format", "mp4"])
+        .args([
+            "--postprocessor-args",
+            "ffmpeg:-c:v libx264 -preset ultrafast -crf 23 -c:a aac -movflags +faststart",
+        ]);
+
+    // Apply quality filter if specified
+    if let Some(height) = max_height {
+        let format = format!(
+            "bestvideo[height<={}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={}]+bestaudio/best[height<={}]/best",
+            height, height, height
+        );
+        cmd.args(["-f", &format]);
+    }
+
+    cmd.arg(url);
     cmd
 }
 
@@ -35,17 +138,20 @@ fn build_base_command(url: &str) -> process::Command {
 //     }
 // }
 
-pub async fn download_video(url: &str, unique_id: &str) -> BotResult<String> {
+pub async fn download_video(url: &str, unique_id: &str, max_height: Option<u32>) -> BotResult<String> {
     fs::create_dir_all("videos").await?;
 
-    let mut cmd = build_base_command(url);
-    let output = cmd
+    let mut cmd = build_base_command(url, max_height);
+    let cmd2: &mut process::Command = cmd
+        .args(["--no-simulate"])
+        .args(["-o", &get_output_format(unique_id)]);
+    let output = cmd2
         .args(["--print", "after_move:filepath"])
-        .args(["-q", "--no-warnings", "--no-simulate"])
-        .args(["-o", &get_output_format(unique_id)])
+        .args(["-q", "--no-warnings"])
         .output()
         .await
         .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
+    info!("Running command {:?}", cmd2);
 
     if output.status.success() {
         let filename = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -57,7 +163,7 @@ pub async fn download_video(url: &str, unique_id: &str) -> BotResult<String> {
 }
 
 pub async fn get_video_duration(url: &str) -> BotResult<u32> {
-    let mut cmd = build_base_command(url);
+    let mut cmd = build_base_command(url, None);
     let output = cmd
         .args(["--print", "duration"])
         .output()
