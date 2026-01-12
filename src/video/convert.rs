@@ -275,3 +275,58 @@ fn move_to_new_folder(path: &Path, new_folder: &str) -> PathBuf {
 
     Path::new(new_folder).join(filename)
 }
+
+/// Generate a thumbnail from a video file
+/// Returns the path to the generated thumbnail (JPEG)
+pub async fn generate_thumbnail<P: AsRef<Path>>(video_path: P) -> BotResult<String> {
+    let input_path = video_path.as_ref();
+
+    // Create thumbnail path with .jpg extension
+    let thumb_filename = format!(
+        "{}_thumb.jpg",
+        input_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("video")
+    );
+    let thumb_path = Path::new("converted").join(&thumb_filename);
+
+    fs::create_dir_all("converted").await?;
+
+    // Extract frame at 1 second (or first frame if video is shorter)
+    let output = process::Command::new("ffmpeg")
+        .args(["-y", "-i"])
+        .arg(input_path)
+        .args([
+            "-ss", "1",           // Seek to 1 second
+            "-vframes", "1",      // Extract 1 frame
+            "-vf", "scale=320:-1", // Scale to 320px width, keep aspect ratio
+            "-q:v", "5",          // JPEG quality (2-31, lower is better)
+        ])
+        .arg(&thumb_path)
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        // Try extracting first frame if 1 second seek failed
+        let output = process::Command::new("ffmpeg")
+            .args(["-y", "-i"])
+            .arg(input_path)
+            .args([
+                "-vframes", "1",
+                "-vf", "scale=320:-1",
+                "-q:v", "5",
+            ])
+            .arg(&thumb_path)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(crate::errors::ConversionError::FfmpegFailed(
+                output.status,
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ).into());
+        }
+    }
+
+    Ok(thumb_path.to_string_lossy().into_owned())
+}

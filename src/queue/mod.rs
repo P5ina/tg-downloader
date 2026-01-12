@@ -40,6 +40,7 @@ pub struct PendingDownload {
 #[derive(Debug, Clone)]
 pub struct PendingConversion {
     pub filename: String,
+    pub thumbnail_path: Option<String>,
     pub chat_id: ChatId,
     pub message_id: MessageId,
 }
@@ -75,6 +76,7 @@ pub enum TaskType {
     /// Convert downloaded video to specific format
     Convert {
         filename: String,
+        thumbnail_path: Option<String>,
         format: MediaFormatType,
     },
 }
@@ -180,10 +182,11 @@ impl TaskQueue {
     }
 
     /// Store a pending conversion and return short ID for callback
-    pub async fn add_pending_conversion(&self, filename: String, chat_id: ChatId, message_id: MessageId) -> ShortId {
+    pub async fn add_pending_conversion(&self, filename: String, thumbnail_path: Option<String>, chat_id: ChatId, message_id: MessageId) -> ShortId {
         let short_id = ShortId::new();
         let pending = PendingConversion {
             filename,
+            thumbnail_path,
             chat_id,
             message_id,
         };
@@ -334,8 +337,8 @@ async fn process_task(
         TaskType::Download { url, quality } => {
             process_download_task(bot, task, url, *quality, pending_conversions).await
         }
-        TaskType::Convert { filename, format } => {
-            process_convert_task(bot, task, filename, format.clone()).await
+        TaskType::Convert { filename, thumbnail_path, format } => {
+            process_convert_task(bot, task, filename, thumbnail_path.clone(), format.clone()).await
         }
     }
 }
@@ -364,8 +367,8 @@ async fn process_download_task(
         .await;
 
     match download_video(url, &task.unique_file_id, Some(quality)).await {
-        Ok(filename) => {
-            log::info!("Downloaded file: {}", filename);
+        Ok(result) => {
+            log::info!("Downloaded file: {}", result.video_path);
 
             // Store pending conversion and get short ID
             let short_id = ShortId::new();
@@ -374,7 +377,8 @@ async fn process_download_task(
                 conversions.insert(
                     short_id.0.clone(),
                     PendingConversion {
-                        filename: filename.clone(),
+                        filename: result.video_path.clone(),
+                        thumbnail_path: result.thumbnail_path.clone(),
                         chat_id: task.chat_id,
                         message_id: task.message_id,
                     },
@@ -425,10 +429,11 @@ async fn process_convert_task(
     bot: &Bot,
     task: &Task,
     filename: &str,
+    thumbnail_path: Option<String>,
     format: MediaFormatType,
 ) -> Result<(), String> {
     use crate::video::convert::{convert_audio, convert_video_note};
-    use crate::video::{VideoInfo, compress_video_with_progress};
+    use crate::video::{VideoInfo, compress_video_with_progress, generate_thumbnail};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use teloxide::types::{InputFile, ParseMode};
@@ -448,13 +453,30 @@ async fn process_convert_task(
             .await
             .map_err(|e| e.to_string())?;
 
-        let result = bot
+        // Use YouTube thumbnail if available, otherwise generate one
+        let thumbnail = if thumbnail_path.is_some() {
+            thumbnail_path.clone()
+        } else {
+            generate_thumbnail(filename).await.ok()
+        };
+
+        let mut request = bot
             .send_video(task.chat_id, InputFile::file(filename))
             .width(video_info.width)
             .height(video_info.height)
             .duration(video_info.duration as u32)
-            .supports_streaming(true)
-            .await;
+            .supports_streaming(true);
+
+        if let Some(ref thumb_path) = thumbnail {
+            request = request.thumbnail(InputFile::file(thumb_path));
+        }
+
+        let result = request.await;
+
+        // Clean up thumbnail
+        if let Some(thumb_path) = thumbnail {
+            let _ = fs::remove_file(&thumb_path).await;
+        }
 
         match result {
             Ok(_) => {
@@ -482,15 +504,30 @@ async fn process_convert_task(
                             .await
                             .map_err(|e| e.to_string())?;
 
-                        let send_result = bot
+                        // Use original thumbnail or generate from compressed video
+                        let thumb = if thumbnail_path.is_some() {
+                            thumbnail_path.clone()
+                        } else {
+                            generate_thumbnail(&compressed).await.ok()
+                        };
+
+                        let mut request = bot
                             .send_video(task.chat_id, InputFile::file(&compressed))
                             .width(video_info.width)
                             .height(video_info.height)
                             .duration(video_info.duration as u32)
-                            .supports_streaming(true)
-                            .await;
+                            .supports_streaming(true);
+
+                        if let Some(ref thumb_path) = thumb {
+                            request = request.thumbnail(InputFile::file(thumb_path));
+                        }
+
+                        let send_result = request.await;
 
                         let _ = fs::remove_file(&compressed).await;
+                        if let Some(thumb_path) = thumb {
+                            let _ = fs::remove_file(&thumb_path).await;
+                        }
 
                         match send_result {
                             Ok(_) => {
@@ -589,13 +626,33 @@ async fn process_convert_task(
                     let video_info = VideoInfo::from_file(&converted_file)
                         .await
                         .map_err(|e| e.to_string())?;
-                    bot.send_video(task.chat_id, InputFile::file(&converted_file))
+
+                    // Use original thumbnail or generate from converted video
+                    let thumb = if thumbnail_path.is_some() {
+                        thumbnail_path.clone()
+                    } else {
+                        generate_thumbnail(&converted_file).await.ok()
+                    };
+
+                    let mut request = bot
+                        .send_video(task.chat_id, InputFile::file(&converted_file))
                         .width(video_info.width)
                         .height(video_info.height)
                         .duration(video_info.duration as u32)
-                        .supports_streaming(true)
-                        .await
-                        .map(|_| ())
+                        .supports_streaming(true);
+
+                    if let Some(ref thumb_path) = thumb {
+                        request = request.thumbnail(InputFile::file(thumb_path));
+                    }
+
+                    let result = request.await.map(|_| ());
+
+                    // Clean up thumbnail
+                    if let Some(thumb_path) = thumb {
+                        let _ = fs::remove_file(&thumb_path).await;
+                    }
+
+                    result
                 }
                 MediaFormatType::Audio => bot
                     .send_audio(task.chat_id, InputFile::file(&converted_file))

@@ -2,6 +2,7 @@
 /videos
 /converted
 /bot-api-data
+subscriptions.db
 
 .env
 .DS_Store

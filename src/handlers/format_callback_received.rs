@@ -111,6 +111,7 @@ pub async fn format_callback_received(
         id: TaskId::new(),
         task_type: TaskType::Convert {
             filename: pending.filename,
+            thumbnail_path: pending.thumbnail_path,
             format,
         },
         chat_id,

@@ -143,12 +143,28 @@ fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
 //     }
 // }
 
-pub async fn download_video(url: &str, unique_id: &str, max_height: Option<u32>) -> BotResult<String> {
+/// Result of video download containing video path and optional thumbnail path
+#[derive(Debug, Clone)]
+pub struct DownloadResult {
+    pub video_path: String,
+    pub thumbnail_path: Option<String>,
+}
+
+impl std::fmt::Display for DownloadResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.video_path)
+    }
+}
+
+pub async fn download_video(url: &str, unique_id: &str, max_height: Option<u32>) -> BotResult<DownloadResult> {
     fs::create_dir_all("videos").await?;
 
     let mut cmd = build_base_command(url, max_height);
     cmd.args(["--no-simulate"])
         .args(["-o", &get_output_format(unique_id)])
+        // Download thumbnail
+        .args(["--write-thumbnail"])
+        .args(["--convert-thumbnails", "jpg"])
         .args(["--print", "after_move:filepath"]);
 
     info!("Starting download: {} (quality: {:?})", url, max_height);
@@ -161,14 +177,38 @@ pub async fn download_video(url: &str, unique_id: &str, max_height: Option<u32>)
     info!("yt-dlp exit code: {:?}", output.status.code());
 
     if output.status.success() {
-        let filename = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        info!("Download successful: {}", filename);
-        Ok(filename)
+        let video_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        info!("Download successful: {}", video_path);
+
+        // Find thumbnail file (same name but .jpg extension)
+        let thumbnail_path = find_thumbnail(&video_path).await;
+
+        Ok(DownloadResult {
+            video_path,
+            thumbnail_path,
+        })
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         log::error!("yt-dlp failed: {}", stderr);
         Err(BotError::youtube_error(stderr))
     }
+}
+
+/// Find thumbnail file for a video (yt-dlp saves it with same name but .jpg extension)
+async fn find_thumbnail(video_path: &str) -> Option<String> {
+    use std::path::Path;
+
+    let video_path = Path::new(video_path);
+    let stem = video_path.file_stem()?.to_str()?;
+    let parent = video_path.parent()?;
+
+    // yt-dlp may save thumbnail as .jpg
+    let thumb_path = parent.join(format!("{}.jpg", stem));
+    if fs::try_exists(&thumb_path).await.ok()? {
+        return Some(thumb_path.to_string_lossy().into_owned());
+    }
+
+    None
 }
 
 pub async fn get_video_duration(url: &str) -> BotResult<u32> {
