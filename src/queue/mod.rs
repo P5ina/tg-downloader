@@ -453,6 +453,7 @@ async fn process_convert_task(
             .width(video_info.width)
             .height(video_info.height)
             .duration(video_info.duration as u32)
+            .supports_streaming(true)
             .await;
 
         match result {
@@ -486,6 +487,7 @@ async fn process_convert_task(
                             .width(video_info.width)
                             .height(video_info.height)
                             .duration(video_info.duration as u32)
+                            .supports_streaming(true)
                             .await;
 
                         let _ = fs::remove_file(&compressed).await;
@@ -591,6 +593,7 @@ async fn process_convert_task(
                         .width(video_info.width)
                         .height(video_info.height)
                         .duration(video_info.duration as u32)
+                        .supports_streaming(true)
                         .await
                         .map(|_| ())
                 }
