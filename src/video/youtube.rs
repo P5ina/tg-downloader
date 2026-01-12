@@ -97,13 +97,10 @@ fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
         .args(["--socket-timeout", "5", "--retries", "3"])
         // Download fragments concurrently to bypass YouTube throttling
         .args(["-N", "4"])
-        // Merge streams into mp4 container without re-encoding when possible
-        .args(["--merge-output-format", "mp4"])
-        // Add faststart for streaming compatibility (quick metadata seek)
-        .args([
-            "--postprocessor-args",
-            "ffmpeg:-movflags +faststart",
-        ]);
+        // Always remux to mp4 to ensure faststart is applied
+        .args(["--remux-video", "mp4"])
+        // Add faststart for streaming compatibility (allows playback before full download)
+        .args(["--ppa", "FFmpegVideoRemuxer:-movflags +faststart"]);
 
     // Apply quality filter - prefer H.264 (avc1) and AAC for Telegram compatibility
     // This avoids re-encoding since these codecs are natively supported

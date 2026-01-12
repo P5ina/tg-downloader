@@ -86,8 +86,14 @@ pub async fn convert_with_progress<P: AsRef<Path>>(
     let mut cmd = process::Command::new("ffmpeg");
     cmd.args(["-y", "-i"])
         .arg(&input_path)
-        .args(args)
-        .arg("-progress")
+        .args(args);
+
+    // Add faststart flag for MP4 files to enable streaming before full download
+    if ext == "mp4" {
+        cmd.args(["-movflags", "+faststart"]);
+    }
+
+    cmd.arg("-progress")
         .arg(&progress_file)
         .arg(&output_path)
         .stdout(Stdio::null())
