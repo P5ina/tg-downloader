@@ -63,10 +63,19 @@ async fn main() {
 /// Clean up files that are not referenced by any pending task
 async fn cleanup_orphaned_files(db: &TaskDb) {
     use std::collections::HashSet;
+    use std::path::Path;
     use tokio::fs;
 
     let active_files: HashSet<String> = match db.get_active_filenames().await {
-        Ok(files) => files.into_iter().collect(),
+        Ok(files) => files
+            .into_iter()
+            .filter_map(|f| {
+                // Extract just the filename for comparison
+                Path::new(&f)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+            })
+            .collect(),
         Err(e) => {
             log::error!("Failed to get active filenames: {}", e);
             return;
@@ -78,8 +87,11 @@ async fn cleanup_orphaned_files(db: &TaskDb) {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.is_file() {
-                let path_str = path.to_string_lossy().to_string();
-                if !active_files.contains(&path_str) {
+                let filename = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if !active_files.contains(&filename) {
                     if let Err(e) = fs::remove_file(&path).await {
                         log::warn!("Failed to remove orphaned file {:?}: {}", path, e);
                     } else {
@@ -95,8 +107,11 @@ async fn cleanup_orphaned_files(db: &TaskDb) {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if path.is_file() {
-                let path_str = path.to_string_lossy().to_string();
-                if !active_files.contains(&path_str) {
+                let filename = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if !active_files.contains(&filename) {
                     if let Err(e) = fs::remove_file(&path).await {
                         log::warn!("Failed to remove orphaned file {:?}: {}", path, e);
                     } else {
