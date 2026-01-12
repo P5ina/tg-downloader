@@ -382,7 +382,9 @@ impl TaskQueue {
 
         // 2. Handle tasks that were processing when bot crashed
         if let Ok(tasks) = self.db.get_all_tasks().await {
+            log::info!("Found {} tasks in database to process", tasks.len());
             for task_row in tasks {
+                log::info!("Processing task {} with status: {}", task_row.id, task_row.status);
                 if task_row.status == "processing" {
                     // Task was interrupted - notify user
                     let _ = bot
@@ -445,8 +447,10 @@ impl TaskQueue {
         let pending_conversions = self.pending_conversions.lock().await;
         let mut to_notify: Vec<(String, PendingConversion, bool)> = Vec::new();
 
+        log::info!("Found {} pending conversions to restore", pending_conversions.len());
         for (short_id, pending) in pending_conversions.iter() {
             let file_exists = fs::metadata(&pending.filename).await.is_ok();
+            log::info!("Pending conversion {}: file={}, exists={}", short_id, pending.filename, file_exists);
             to_notify.push((short_id.clone(), pending.clone(), file_exists));
         }
         drop(pending_conversions);
