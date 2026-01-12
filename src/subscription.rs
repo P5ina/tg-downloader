@@ -28,11 +28,72 @@ impl SubscriptionManager {
         )
         .execute(&pool)
         .await
-        .map_err(|e| BotError::general(format!("Failed to create table: {}", e)))?;
+        .map_err(|e| BotError::general(format!("Failed to create subscriptions table: {}", e)))?;
+
+        // Create tasks table for queue persistence
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL,
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                unique_file_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                url TEXT,
+                quality INTEGER,
+                filename TEXT,
+                thumbnail_path TEXT,
+                format TEXT,
+                created_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| BotError::general(format!("Failed to create tasks table: {}", e)))?;
+
+        // Create pending_downloads table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS pending_downloads (
+                short_id TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| BotError::general(format!("Failed to create pending_downloads table: {}", e)))?;
+
+        // Create pending_conversions table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS pending_conversions (
+                short_id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                thumbnail_path TEXT,
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| BotError::general(format!("Failed to create pending_conversions table: {}", e)))?;
 
         Ok(Self {
             pool: Arc::new(pool),
         })
+    }
+
+    /// Get the database pool for sharing with other components
+    pub fn pool(&self) -> Arc<SqlitePool> {
+        self.pool.clone()
     }
 
     /// Check if a user has an active subscription

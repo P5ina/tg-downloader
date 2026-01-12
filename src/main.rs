@@ -1,4 +1,5 @@
 mod commands;
+pub mod db;
 mod errors;
 mod handlers;
 pub mod queue;
@@ -12,10 +13,10 @@ use std::sync::Arc;
 use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
 
 use crate::{
+    db::TaskDb,
     queue::TaskQueue,
     schema::{State, schema},
     subscription::SubscriptionManager,
-    utils::clear_dir,
 };
 
 #[tokio::main]
@@ -36,9 +37,16 @@ async fn main() {
     );
     log::info!("Subscription manager initialized");
 
-    // Initialize the task queue
-    let task_queue = TaskQueue::new(bot.clone());
+    // Initialize the task database and queue
+    let task_db = TaskDb::new(subscription_manager.pool());
+    let task_queue = TaskQueue::new(bot.clone(), task_db.clone()).await;
     log::info!("Task queue initialized");
+
+    // Restore state after restart and notify affected users
+    task_queue.restore_on_startup(&bot).await;
+
+    // Clean up orphaned files (not referenced by any pending task)
+    cleanup_orphaned_files(&task_db).await;
 
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![
@@ -50,7 +58,52 @@ async fn main() {
         .build()
         .dispatch()
         .await;
+}
 
-    clear_dir("videos").await.unwrap();
-    clear_dir("converted").await.unwrap();
+/// Clean up files that are not referenced by any pending task
+async fn cleanup_orphaned_files(db: &TaskDb) {
+    use std::collections::HashSet;
+    use tokio::fs;
+
+    let active_files: HashSet<String> = match db.get_active_filenames().await {
+        Ok(files) => files.into_iter().collect(),
+        Err(e) => {
+            log::error!("Failed to get active filenames: {}", e);
+            return;
+        }
+    };
+
+    // Clean videos directory
+    if let Ok(mut entries) = fs::read_dir("videos").await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.is_file() {
+                let path_str = path.to_string_lossy().to_string();
+                if !active_files.contains(&path_str) {
+                    if let Err(e) = fs::remove_file(&path).await {
+                        log::warn!("Failed to remove orphaned file {:?}: {}", path, e);
+                    } else {
+                        log::info!("Removed orphaned file: {:?}", path);
+                    }
+                }
+            }
+        }
+    }
+
+    // Clean converted directory
+    if let Ok(mut entries) = fs::read_dir("converted").await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.is_file() {
+                let path_str = path.to_string_lossy().to_string();
+                if !active_files.contains(&path_str) {
+                    if let Err(e) = fs::remove_file(&path).await {
+                        log::warn!("Failed to remove orphaned file {:?}: {}", path, e);
+                    } else {
+                        log::info!("Removed orphaned file: {:?}", path);
+                    }
+                }
+            }
+        }
+    }
 }
