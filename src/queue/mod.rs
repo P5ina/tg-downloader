@@ -657,7 +657,7 @@ async fn process_download_task(
         )
         .await;
 
-    match download_video(url, &task.unique_file_id, quality).await {
+    match download_video(url, &task.unique_file_id, quality, &format).await {
         Ok(result) => {
             log::info!("Downloaded file: {}", result.video_path);
 

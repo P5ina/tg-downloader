@@ -3,6 +3,7 @@ use serde::Deserialize;
 use tokio::{fs, process};
 
 use crate::errors::{BotError, BotResult};
+use crate::utils::MediaFormatType;
 
 pub const MAX_VIDEO_DURATION_SECONDS: u32 = 3600; // 1 hour
 
@@ -91,7 +92,7 @@ fn get_output_format(unique_id: &str) -> String {
     format!("videos/%(id)s_{unique_id}.%(ext)s")
 }
 
-fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
+fn build_video_command(url: &str, max_height: Option<u32>) -> process::Command {
     let mut cmd = process::Command::new("yt-dlp");
     cmd.arg("--no-playlist")
         .args(["--socket-timeout", "5", "--retries", "3"])
@@ -127,6 +128,21 @@ fn build_base_command(url: &str, max_height: Option<u32>) -> process::Command {
     cmd
 }
 
+fn build_audio_command(url: &str) -> process::Command {
+    let mut cmd = process::Command::new("yt-dlp");
+    cmd.arg("--no-playlist")
+        .args(["--socket-timeout", "5", "--retries", "3"])
+        // Download fragments concurrently
+        .args(["-N", "4"])
+        // Download only audio - prefer AAC for Telegram compatibility
+        .args(["-f", "bestaudio[acodec^=mp4a]/bestaudio/best"])
+        // Extract audio and convert to m4a (AAC container)
+        .args(["-x", "--audio-format", "m4a"]);
+
+    cmd.arg(url);
+    cmd
+}
+
 // pub async fn get_filename(url: &str, unique_id: &str) -> BotResult<String> {
 //     let mut cmd = build_base_command(url, unique_id);
 //     let output = cmd
@@ -156,18 +172,36 @@ impl std::fmt::Display for DownloadResult {
     }
 }
 
-pub async fn download_video(url: &str, unique_id: &str, max_height: Option<u32>) -> BotResult<DownloadResult> {
+pub async fn download_video(
+    url: &str,
+    unique_id: &str,
+    max_height: Option<u32>,
+    format: &MediaFormatType,
+) -> BotResult<DownloadResult> {
     fs::create_dir_all("videos").await?;
 
-    let mut cmd = build_base_command(url, max_height);
+    let is_audio_only = matches!(format, MediaFormatType::Audio | MediaFormatType::Voice);
+
+    let mut cmd = if is_audio_only {
+        build_audio_command(url)
+    } else {
+        build_video_command(url, max_height)
+    };
+
     cmd.args(["--no-simulate"])
         .args(["-o", &get_output_format(unique_id)])
-        // Download thumbnail
-        .args(["--write-thumbnail"])
-        .args(["--convert-thumbnails", "jpg"])
         .args(["--print", "after_move:filepath"]);
 
-    info!("Starting download: {} (quality: {:?})", url, max_height);
+    // Download thumbnail only for video formats
+    if !is_audio_only {
+        cmd.args(["--write-thumbnail"])
+            .args(["--convert-thumbnails", "jpg"]);
+    }
+
+    info!(
+        "Starting download: {} (quality: {:?}, format: {:?}, audio_only: {})",
+        url, max_height, format, is_audio_only
+    );
 
     let output = cmd
         .output()
@@ -177,14 +211,18 @@ pub async fn download_video(url: &str, unique_id: &str, max_height: Option<u32>)
     info!("yt-dlp exit code: {:?}", output.status.code());
 
     if output.status.success() {
-        let video_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        info!("Download successful: {}", video_path);
+        let file_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        info!("Download successful: {}", file_path);
 
-        // Find thumbnail file (same name but .jpg extension)
-        let thumbnail_path = find_thumbnail(&video_path).await;
+        // Find thumbnail file only for video formats
+        let thumbnail_path = if is_audio_only {
+            None
+        } else {
+            find_thumbnail(&file_path).await
+        };
 
         Ok(DownloadResult {
-            video_path,
+            video_path: file_path,
             thumbnail_path,
         })
     } else {
@@ -212,9 +250,13 @@ async fn find_thumbnail(video_path: &str) -> Option<String> {
 }
 
 pub async fn get_video_duration(url: &str) -> BotResult<u32> {
-    let mut cmd = build_base_command(url, None);
-    let output = cmd
+    let mut cmd = process::Command::new("yt-dlp");
+    cmd.arg("--no-playlist")
+        .args(["--socket-timeout", "5", "--retries", "3"])
         .args(["--print", "duration"])
+        .arg(url);
+
+    let output = cmd
         .output()
         .await
         .map_err(|e| BotError::external_command_error("yt-dlp", e.to_string()))?;
