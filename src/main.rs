@@ -2,6 +2,7 @@ mod commands;
 pub mod db;
 mod errors;
 mod handlers;
+mod migrations;
 pub mod queue;
 mod schema;
 pub mod subscription;

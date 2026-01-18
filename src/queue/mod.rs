@@ -29,12 +29,14 @@ impl std::fmt::Display for ShortId {
     }
 }
 
-/// Pending download waiting for quality selection
+/// Pending download waiting for format/quality selection
 #[derive(Debug, Clone)]
 pub struct PendingDownload {
     pub url: String,
     pub chat_id: ChatId,
     pub message_id: MessageId,
+    /// Selected format (set after format selection)
+    pub format: Option<MediaFormatType>,
 }
 
 /// Pending conversion waiting for format selection
@@ -69,12 +71,15 @@ impl std::fmt::Display for TaskId {
 /// Task types that can be queued
 #[derive(Debug, Clone)]
 pub enum TaskType {
-    /// Download video from YouTube
+    /// Download video from YouTube and convert to specified format
     Download {
         url: String,
-        quality: u32,
+        /// Quality height (e.g., 720, 1080). None for audio-only downloads.
+        quality: Option<u32>,
+        /// Target format for conversion after download
+        format: MediaFormatType,
     },
-    /// Convert downloaded video to specific format
+    /// Convert downloaded video to specific format (legacy, for direct uploads)
     Convert {
         filename: String,
         thumbnail_path: Option<String>,
@@ -154,6 +159,7 @@ impl TaskQueue {
                         url: row.url,
                         chat_id: ChatId(row.chat_id),
                         message_id: MessageId(row.message_id),
+                        format: row.format,
                     },
                 );
             }
@@ -197,12 +203,13 @@ impl TaskQueue {
     }
 
     /// Store a pending download and return short ID for callback
-    pub async fn add_pending_download(&self, url: String, chat_id: ChatId, message_id: MessageId) -> ShortId {
+    pub async fn add_pending_download(&self, url: String, chat_id: ChatId, message_id: MessageId, format: Option<MediaFormatType>) -> ShortId {
         let short_id = ShortId::new();
         let pending = PendingDownload {
             url: url.clone(),
             chat_id,
             message_id,
+            format: format.clone(),
         };
 
         // Save to database
@@ -211,6 +218,7 @@ impl TaskQueue {
             &url,
             chat_id.0,
             message_id.0,
+            format.as_ref().map(|f| f.to_string()).as_deref(),
         ).await {
             log::error!("Failed to save pending download to DB: {}", e);
         }
@@ -230,6 +238,29 @@ impl TaskQueue {
 
         let mut pending_downloads = self.pending_downloads.lock().await;
         pending_downloads.remove(short_id)
+    }
+
+    /// Update format for a pending download
+    pub async fn update_pending_download_format(&self, short_id: &str, format: MediaFormatType) -> Option<()> {
+        let mut pending_downloads = self.pending_downloads.lock().await;
+        if let Some(pending) = pending_downloads.get_mut(short_id) {
+            pending.format = Some(format.clone());
+
+            // Update in database
+            if let Err(e) = self.db.update_pending_download_format(short_id, &format.to_string()).await {
+                log::error!("Failed to update pending download format in DB: {}", e);
+            }
+
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    /// Get a pending download without removing it
+    pub async fn get_pending_download(&self, short_id: &str) -> Option<PendingDownload> {
+        let pending_downloads = self.pending_downloads.lock().await;
+        pending_downloads.get(short_id).cloned()
     }
 
     /// Store a pending conversion and return short ID for callback
@@ -277,8 +308,8 @@ impl TaskQueue {
 
         // Save task to database
         let (task_type_str, url, quality, filename, thumbnail_path, format) = match &task.task_type {
-            TaskType::Download { url, quality } => {
-                ("download", Some(url.as_str()), Some(*quality as i32), None, None, None)
+            TaskType::Download { url, quality, format } => {
+                ("download", Some(url.as_str()), quality.map(|q| q as i32), None, None, Some(format.to_string()))
             }
             TaskType::Convert { filename, thumbnail_path, format } => {
                 ("convert", None, None, Some(filename.as_str()), thumbnail_path.as_deref(), Some(format.to_string()))
@@ -314,7 +345,12 @@ impl TaskQueue {
         {
             let mut statuses = self.task_statuses.lock().await;
             let task_type = match &task.task_type {
-                TaskType::Download { quality, .. } => format!("📥 {}p", quality),
+                TaskType::Download { quality, format, .. } => {
+                    match quality {
+                        Some(q) => format!("📥 {}p {}", q, format),
+                        None => format!("📥 {}", format),
+                    }
+                }
                 TaskType::Convert { format, .. } => format!("{} {}", format.emoji(), format),
             };
             statuses.insert(
@@ -586,12 +622,12 @@ impl TaskQueue {
 async fn process_task(
     bot: &Bot,
     task: &Task,
-    pending_conversions: &Arc<Mutex<HashMap<String, PendingConversion>>>,
-    db: &TaskDb,
+    _pending_conversions: &Arc<Mutex<HashMap<String, PendingConversion>>>,
+    _db: &TaskDb,
 ) -> Result<(), String> {
     match &task.task_type {
-        TaskType::Download { url, quality } => {
-            process_download_task(bot, task, url, *quality, pending_conversions, db).await
+        TaskType::Download { url, quality, format } => {
+            process_download_task(bot, task, url, *quality, format.clone()).await
         }
         TaskType::Convert { filename, thumbnail_path, format } => {
             process_convert_task(bot, task, filename, thumbnail_path.clone(), format.clone()).await
@@ -599,85 +635,34 @@ async fn process_task(
     }
 }
 
-/// Process download task
+/// Process download task - downloads and immediately converts to target format
 async fn process_download_task(
     bot: &Bot,
     task: &Task,
     url: &str,
-    quality: u32,
-    pending_conversions: &Arc<Mutex<HashMap<String, PendingConversion>>>,
-    db: &TaskDb,
+    quality: Option<u32>,
+    format: MediaFormatType,
 ) -> Result<(), String> {
     use crate::video::youtube::download_video;
-    use strum::IntoEnumIterator;
-    use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
-    log::info!("Starting download task: {} at {}p", url, quality);
+    let quality_str = quality.map(|q| format!("{}p", q)).unwrap_or_else(|| "аудио".to_string());
+    log::info!("Starting download task: {} at {} for {:?}", url, quality_str, format);
 
     // Update message to show downloading
     let _ = bot
         .edit_message_text(
             task.chat_id,
             task.message_id,
-            format!("⏳ Скачиваем видео в {}p...", quality),
+            format!("⏳ Скачиваем {}...", quality_str),
         )
         .await;
 
-    match download_video(url, &task.unique_file_id, Some(quality)).await {
+    match download_video(url, &task.unique_file_id, quality).await {
         Ok(result) => {
             log::info!("Downloaded file: {}", result.video_path);
 
-            // Store pending conversion and get short ID
-            let short_id = ShortId::new();
-
-            // Save to database
-            if let Err(e) = db.insert_pending_conversion(
-                &short_id.0,
-                &result.video_path,
-                result.thumbnail_path.as_deref(),
-                task.chat_id.0,
-                task.message_id.0,
-            ).await {
-                log::error!("Failed to save pending conversion to DB: {}", e);
-            }
-
-            {
-                let mut conversions = pending_conversions.lock().await;
-                conversions.insert(
-                    short_id.0.clone(),
-                    PendingConversion {
-                        filename: result.video_path.clone(),
-                        thumbnail_path: result.thumbnail_path.clone(),
-                        chat_id: task.chat_id,
-                        message_id: task.message_id,
-                    },
-                );
-            }
-
-            // Show format selection with short callback: fmt:format_index:short_id
-            let formats: Vec<InlineKeyboardButton> = MediaFormatType::iter()
-                .enumerate()
-                .map(|(idx, f)| {
-                    let label = format!("{}", f);
-                    let callback = format!("fmt:{}:{}", idx, short_id);
-                    InlineKeyboardButton::callback(label, callback)
-                })
-                .collect();
-
-            let keyboard = InlineKeyboardMarkup::default()
-                .append_row([formats[0].clone(), formats[1].clone()])
-                .append_row([formats[2].clone(), formats[3].clone()]);
-
-            let _ = bot
-                .edit_message_text(
-                    task.chat_id,
-                    task.message_id,
-                    "Видео загружено. Теперь выбери формат:",
-                )
-                .reply_markup(keyboard)
-                .await;
-
-            Ok(())
+            // Immediately convert to target format
+            process_convert_task(bot, task, &result.video_path, result.thumbnail_path.clone(), format).await
         }
         Err(e) => {
             log::error!("Download error: {}", e);

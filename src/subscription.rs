@@ -3,6 +3,7 @@ use sqlx::{Row, SqlitePool};
 use std::sync::Arc;
 
 use crate::errors::{BotError, BotResult};
+use crate::migrations;
 
 /// Subscription manager handles premium subscriptions storage
 #[derive(Clone)]
@@ -17,74 +18,8 @@ impl SubscriptionManager {
             .await
             .map_err(|e| BotError::general(format!("Failed to connect to database: {}", e)))?;
 
-        // Create subscriptions table if not exists
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS subscriptions (
-                user_id INTEGER PRIMARY KEY,
-                expires_at INTEGER NOT NULL
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .map_err(|e| BotError::general(format!("Failed to create subscriptions table: {}", e)))?;
-
-        // Create tasks table for queue persistence
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS tasks (
-                id TEXT PRIMARY KEY,
-                task_type TEXT NOT NULL,
-                chat_id INTEGER NOT NULL,
-                message_id INTEGER NOT NULL,
-                unique_file_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                url TEXT,
-                quality INTEGER,
-                filename TEXT,
-                thumbnail_path TEXT,
-                format TEXT,
-                created_at INTEGER NOT NULL
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .map_err(|e| BotError::general(format!("Failed to create tasks table: {}", e)))?;
-
-        // Create pending_downloads table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS pending_downloads (
-                short_id TEXT PRIMARY KEY,
-                url TEXT NOT NULL,
-                chat_id INTEGER NOT NULL,
-                message_id INTEGER NOT NULL,
-                created_at INTEGER NOT NULL
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .map_err(|e| BotError::general(format!("Failed to create pending_downloads table: {}", e)))?;
-
-        // Create pending_conversions table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS pending_conversions (
-                short_id TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
-                thumbnail_path TEXT,
-                chat_id INTEGER NOT NULL,
-                message_id INTEGER NOT NULL,
-                created_at INTEGER NOT NULL
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .map_err(|e| BotError::general(format!("Failed to create pending_conversions table: {}", e)))?;
+        // Run database migrations
+        migrations::run_migrations(&pool).await?;
 
         Ok(Self {
             pool: Arc::new(pool),

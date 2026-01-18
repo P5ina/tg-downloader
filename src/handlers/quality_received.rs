@@ -9,6 +9,7 @@ use teloxide::{
 use crate::{
     errors::{BotError, HandlerResult},
     queue::{Task, TaskId, TaskQueue, TaskType},
+    utils::MediaFormatType,
 };
 
 /// Handle quality selection callback
@@ -57,21 +58,25 @@ pub async fn quality_received(
         BotError::general(format!("Invalid quality: {}", parts[1]))
     })?;
 
-    // Get URL from pending downloads
+    // Get URL and format from pending downloads
     let pending = task_queue.take_pending_download(short_id).await.ok_or_else(|| {
         BotError::general("Download session expired. Please send the link again.")
     })?;
 
-    info!("User selected quality: {}p for URL: {}", height, pending.url);
+    // Get format from pending (should be set by format_first_received)
+    let format = pending.format.unwrap_or(MediaFormatType::Video);
+
+    info!("User selected quality: {}p for URL: {} with format: {:?}", height, pending.url, format);
 
     let unique_file_id = format!("chat{}_msg{}", chat_id, message_id);
 
-    // Create download task
+    // Create download task with format
     let task = Task {
         id: TaskId::new(),
         task_type: TaskType::Download {
             url: pending.url,
-            quality: height,
+            quality: Some(height),
+            format,
         },
         chat_id,
         message_id,

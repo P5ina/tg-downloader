@@ -11,7 +11,7 @@ use crate::{
     commands::*,
     errors::BotError,
     handlers::{
-        format_callback_received, format_received, handle_pre_checkout_query,
+        format_callback_received, format_first_received, format_received, handle_pre_checkout_query,
         handle_successful_payment, link_received, quality_received, video_received,
     },
     utils::is_youtube_video_link,
@@ -45,6 +45,11 @@ enum Command {
 /// Check if callback data is a format selection from queue (fmt:...)
 fn is_format_callback(data: &str) -> bool {
     data.starts_with("fmt:")
+}
+
+/// Check if callback data is a format first selection (ff:...)
+fn is_format_first_callback(data: &str) -> bool {
+    data.starts_with("ff:")
 }
 
 /// Check if callback data is a quality selection (q:...)
@@ -112,7 +117,17 @@ pub fn schema() -> UpdateHandler<BotError> {
                             })
                             .endpoint(handle_buy_premium_callback),
                         )
-                        // Handle quality selection from queue (q:task_id:url:height)
+                        // Handle format first selection (ff:format_index:short_id)
+                        .branch(
+                            dptree::filter(|q: CallbackQuery| {
+                                q.data
+                                    .as_ref()
+                                    .map(|d| is_format_first_callback(d))
+                                    .unwrap_or(false)
+                            })
+                            .endpoint(format_first_received),
+                        )
+                        // Handle quality selection from queue (q:short_id:height)
                         .branch(
                             dptree::filter(|q: CallbackQuery| {
                                 q.data
@@ -122,7 +137,7 @@ pub fn schema() -> UpdateHandler<BotError> {
                             })
                             .endpoint(quality_received),
                         )
-                        // Handle format selection from queue (fmt:format_index:task_id:filename)
+                        // Handle format selection from queue (fmt:format_index:short_id) - legacy for direct uploads
                         .branch(
                             dptree::filter(|q: CallbackQuery| {
                                 q.data

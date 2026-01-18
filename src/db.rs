@@ -16,6 +16,7 @@ pub struct PendingDownloadRow {
     pub url: String,
     pub chat_id: i64,
     pub message_id: i32,
+    pub format: Option<crate::utils::MediaFormatType>,
 }
 
 /// Raw pending conversion row from database
@@ -63,16 +64,18 @@ impl TaskDb {
         url: &str,
         chat_id: i64,
         message_id: i32,
+        format: Option<&str>,
     ) -> Result<(), String> {
         let now = Utc::now().timestamp();
 
         sqlx::query(
-            "INSERT INTO pending_downloads (short_id, url, chat_id, message_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO pending_downloads (short_id, url, chat_id, message_id, format, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(short_id)
         .bind(url)
         .bind(chat_id)
         .bind(message_id)
+        .bind(format)
         .bind(now)
         .execute(self.pool.as_ref())
         .await
@@ -91,11 +94,25 @@ impl TaskDb {
         Ok(())
     }
 
+    pub async fn update_pending_download_format(&self, short_id: &str, format: &str) -> Result<(), String> {
+        sqlx::query("UPDATE pending_downloads SET format = ? WHERE short_id = ?")
+            .bind(format)
+            .bind(short_id)
+            .execute(self.pool.as_ref())
+            .await
+            .map_err(|e| format!("Failed to update pending download format: {}", e))?;
+
+        Ok(())
+    }
+
     pub async fn get_all_pending_downloads(&self) -> Result<Vec<PendingDownloadRow>, String> {
+        use std::str::FromStr;
+        use crate::utils::MediaFormatType;
+
         let cutoff = Utc::now().timestamp() - TASK_TTL_SECONDS;
 
         let rows = sqlx::query(
-            "SELECT short_id, url, chat_id, message_id FROM pending_downloads WHERE created_at > ?",
+            "SELECT short_id, url, chat_id, message_id, format FROM pending_downloads WHERE created_at > ?",
         )
         .bind(cutoff)
         .fetch_all(self.pool.as_ref())
@@ -104,11 +121,16 @@ impl TaskDb {
 
         Ok(rows
             .iter()
-            .map(|row| PendingDownloadRow {
-                short_id: row.get("short_id"),
-                url: row.get("url"),
-                chat_id: row.get("chat_id"),
-                message_id: row.get("message_id"),
+            .map(|row| {
+                let format_str: Option<String> = row.get("format");
+                let format = format_str.and_then(|s| MediaFormatType::from_str(&s).ok());
+                PendingDownloadRow {
+                    short_id: row.get("short_id"),
+                    url: row.get("url"),
+                    chat_id: row.get("chat_id"),
+                    message_id: row.get("message_id"),
+                    format,
+                }
             })
             .collect())
     }

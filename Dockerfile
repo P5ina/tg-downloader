@@ -1,21 +1,6 @@
-# 🍳 Этап подготовки рецепта
-FROM rust:1.87 AS chef
-RUN cargo install cargo-chef
-WORKDIR /app
-
-# 📝 Создаём рецепт (только зависимости)
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
 # 🏗 Этап сборки
-FROM chef AS builder
-
-# Сначала собираем только зависимости (кэшируется!)
-COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
-
-# Теперь копируем код и собираем приложение
+FROM rust:1.87 AS builder
+WORKDIR /app
 COPY . .
 RUN cargo build --release
 
@@ -43,5 +28,4 @@ VOLUME ["/bot-api-data"]
 WORKDIR /data
 RUN mkdir -p /data/videos /data/converted
 
-# По умолчанию запускаем приложение
 CMD ["app"]

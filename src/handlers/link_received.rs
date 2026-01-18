@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use strum::IntoEnumIterator;
 use teloxide::{
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode},
@@ -8,8 +9,9 @@ use teloxide::{
 use crate::{
     errors::{BotError, HandlerResult},
     queue::TaskQueue,
+    utils::MediaFormatType,
     video::youtube::{
-        MAX_VIDEO_DURATION_SECONDS, format_duration, get_available_qualities, get_video_duration,
+        MAX_VIDEO_DURATION_SECONDS, format_duration, get_video_duration,
         is_video_too_long,
     },
 };
@@ -54,54 +56,39 @@ pub async fn link_received(
         }
     }
 
-    // Get available qualities
-    log::info!("Getting available qualities for URL: {}", text);
-    match get_available_qualities(text).await {
-        Ok(qualities) => {
-            log::info!("Found {} quality options", qualities.len());
-            send_quality_message(&bot, &msg, &status_msg, text, &qualities, &task_queue).await?;
-        }
-        Err(e) => {
-            log::error!("Failed to get video qualities: {e}");
-            bot.edit_message_text(
-                msg.chat.id,
-                status_msg.id,
-                "❌ Не могу получить информацию о видео, попробуй другую ссылку.",
-            )
-            .await?;
-        }
-    }
+    // Show format selection first
+    send_format_message(&bot, &msg, &status_msg, text, &task_queue).await?;
 
     Ok(())
 }
 
-async fn send_quality_message(
+/// Show format selection (Video, Audio, VideoNote, Voice)
+async fn send_format_message(
     bot: &Bot,
     msg: &Message,
     status_msg: &Message,
     url: &str,
-    qualities: &[crate::video::VideoQuality],
     task_queue: &Arc<TaskQueue>,
 ) -> HandlerResult {
-    // Store URL in pending downloads and get short ID
+    // Store URL in pending downloads and get short ID (format will be set later)
     let short_id = task_queue
-        .add_pending_download(url.to_string(), msg.chat.id, status_msg.id)
+        .add_pending_download(url.to_string(), msg.chat.id, status_msg.id, None)
         .await;
 
-    // Create quality buttons with short callback: q:short_id:height
-    // Total callback length: "q:" (2) + short_id (8) + ":" (1) + height (max 4) = max 15 chars
-    let buttons: Vec<InlineKeyboardButton> = qualities
-        .iter()
-        .map(|q| {
-            let callback = format!("q:{}:{}", short_id, q.height);
-            InlineKeyboardButton::callback(&q.label, callback)
+    // Create format buttons with callback: ff:format_index:short_id
+    // ff = "format first" to distinguish from fmt (format after download)
+    let formats: Vec<InlineKeyboardButton> = MediaFormatType::iter()
+        .enumerate()
+        .map(|(idx, f)| {
+            let label = format!("{}", f);
+            let callback = format!("ff:{}:{}", idx, short_id);
+            InlineKeyboardButton::callback(label, callback)
         })
         .collect();
 
-    let mut keyboard = InlineKeyboardMarkup::default();
-    for chunk in buttons.chunks(2) {
-        keyboard = keyboard.append_row(chunk.to_vec());
-    }
+    let keyboard = InlineKeyboardMarkup::default()
+        .append_row([formats[0].clone(), formats[1].clone()])
+        .append_row([formats[2].clone(), formats[3].clone()]);
 
     // Show queue status if there are pending tasks
     let pending = task_queue.pending_count();
@@ -114,7 +101,7 @@ async fn send_quality_message(
     bot.edit_message_text(
         msg.chat.id,
         status_msg.id,
-        format!("🎬 Выбери качество видео:{}", queue_info),
+        format!("🎬 Выбери формат:{}", queue_info),
     )
     .reply_markup(keyboard)
     .await?;
