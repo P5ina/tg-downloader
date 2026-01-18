@@ -33,6 +33,6 @@ jobs:
           script: |
             cd ${{ steps.vars.outputs.deploy_path }}
             git pull origin ${{ github.ref_name }}
-            docker compose up -d --build
+            docker compose up -d --build --force-recreate
             echo "Deployed ${{ github.ref_name }} to ${{ steps.vars.outputs.environment }}"
             docker logs ${{ steps.vars.outputs.container_name }} --tail 10
